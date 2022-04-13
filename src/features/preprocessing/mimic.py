@@ -43,6 +43,7 @@ class MimicPreprocessorConfig:
     diagnosis_file: Path = Path("data/DIAGNOSES_ICD.csv")
     hierarchy_file: Path = Path("data/ccs_multi_dx_tool_2015.csv")
     icd9_file: Path = Path("data/icd9.csv")
+    icd9_hierarchy_file: Path = Path("data/hierarchy_icd9.csv")
     use_icd9_data: bool = True
     min_admissions_per_user: int = 2
     sequence_column_name: str = "icd9_code_converted_3digits"
@@ -451,7 +452,7 @@ class MimicPreprocessor(Preprocessor):
         return diagnosis_df
 
     def _add_icd9_information(self, diagnosis_df: pd.DataFrame) -> pd.DataFrame:
-        icd9_preprocessor = ICD9DataPreprocessor(self.config.icd9_file)
+        icd9_preprocessor = ICD9DataPreprocessor(self.config.icd9_file, self.config.icd9_hierarchy_file)
 
         icd9_df = icd9_preprocessor.load_data()[
             ["child_code", "child_name"]
