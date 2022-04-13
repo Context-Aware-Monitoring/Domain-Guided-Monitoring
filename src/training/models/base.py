@@ -48,7 +48,7 @@ class BaseEmbedding:
             return None
         elif self.config.kernel_regularizer_type == "l2":
             return tf.keras.regularizers.l2(self.config.kernel_regularizer_value)
-        elif self.config.kernel_regularizer_type == "l2":
+        elif self.config.kernel_regularizer_type == "l1":
             return tf.keras.regularizers.l1(self.config.kernel_regularizer_value)
         else:
             return None
