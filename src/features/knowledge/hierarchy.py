@@ -65,11 +65,8 @@ class HierarchyKnowledge(BaseKnowledge):
                 self.extended_vocab[label] = max_index + 1
                 max_index = max_index + 1
 
-            label_names = set(
-                hierarchy_df[hierarchy_df[self.child_id_col] == label][
-                    self.child_name_col
-                ]
-            )
+            parents_df = hierarchy_df[hierarchy_df[self.child_id_col] == label]
+            label_names = set(parents_df[self.child_name_col])
             label_names.update(
                 set(
                     hierarchy_df[hierarchy_df[self.parent_id_col] == label][
@@ -83,7 +80,6 @@ class HierarchyKnowledge(BaseKnowledge):
                 label_names=label_names,
             )
 
-            parents_df = hierarchy_df[hierarchy_df[self.child_id_col] == label]
             parents = list(set(parents_df[self.parent_id_col]))
             labels_to_handle = labels_to_handle + parents
 

@@ -1,6 +1,6 @@
 from src.features.knowledge.base import BaseKnowledge
 import tensorflow as tf
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from .config import ModelConfig
 from .base import BaseEmbedding
 import logging
@@ -59,17 +59,24 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
         self.connections: Dict[int, List[int]] = {}
         self.connection_partition: List[
             int
-        ] = []  # connection_partition[i] = j -> {connection i relevant for j}
+        ] = [] # connection_partition[i] = j -> {connection i relevant for j}
 
-        for idx in tqdm(
-            range(self.num_features),
-            desc="Initializing {} connections".format(self.embedding_name),
-        ):
+        partition_length = [0] * self.num_features
+
+        for idx in range(self.num_features):
             connected_idxs = knowledge.get_connections_for_idx(idx)
             self.connections[idx] = sorted(list(connected_idxs))
-            self.connection_partition = self.connection_partition + [idx] * len(
-                connected_idxs
-            )
+            partition_length[idx] = len(connected_idxs)
+
+        connection_partition_length = sum(partition_length)
+        self.connection_partition = [0] * connection_partition_length
+
+        current_partition_begin = 0
+        for idx in range(self.num_features):
+            for i in range(current_partition_begin, current_partition_begin + partition_length[idx]):
+                self.connection_partition[i] = idx
+
+            current_partition_begin += partition_length[idx]
 
         self.connection_indices = [
             v for _, v in sorted(self.connections.items(), key=lambda x: x[0])
