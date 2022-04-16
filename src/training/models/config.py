@@ -32,6 +32,8 @@ class ModelConfig:
     kernel_regularizer_scope: List[str] = dataclasses.field(
         default_factory=lambda: []
     )
+    use_corrective_terms: bool = True
+    corrective_factor: float = 0.0
 
 
 @dataclass_cli.add

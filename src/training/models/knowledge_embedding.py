@@ -32,6 +32,7 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
 
         self._init_basic_embedding_variables(knowledge)
         self._init_connection_information(knowledge)
+        self._init_corrective_terms()
 
     def _init_basic_embedding_variables(self, knowledge: BaseKnowledge):
         logging.info("Initializing %s basic embedding variables", self.embedding_name)
@@ -57,9 +58,6 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
     def _init_connection_information(self, knowledge: BaseKnowledge):
         logging.info("Initializing %s connection information", self.embedding_name)
         self.connections: Dict[int, List[int]] = {}
-        self.connection_partition: List[
-            int
-        ] = [] # connection_partition[i] = j -> {connection i relevant for j}
 
         partition_length = [0] * self.num_features
 
@@ -68,15 +66,15 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
             self.connections[idx] = sorted(list(connected_idxs))
             partition_length[idx] = len(connected_idxs)
 
-        connection_partition_length = sum(partition_length)
-        self.connection_partition = [0] * connection_partition_length
+        self.connection_partition: List[int] = [0] * sum(partition_length)
+        # connection_partition[i] = j -> {connection i relevant for j}
 
         current_partition_begin = 0
         for idx in range(self.num_features):
-            for i in range(current_partition_begin, current_partition_begin + partition_length[idx]):
+            current_partition_end = current_partition_begin + partition_length[idx]
+            for i in range(current_partition_begin, current_partition_end):
                 self.connection_partition[i] = idx
-
-            current_partition_begin += partition_length[idx]
+            current_partition_begin = current_partition_end
 
         self.connection_indices = [
             v for _, v in sorted(self.connections.items(), key=lambda x: x[0])
@@ -86,6 +84,18 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
         ]  # connection k is between connection_partition[k] and flattened_connection_indices[k]
         # connection_indices[i,j] = k -> connection_partition[l]=i, flattened_connection_indices[l]=k
         self.num_connections = len(self.flattened_connection_indices)
+
+    def _init_corrective_terms(self):
+        self.corrective_terms = self.add_weight(
+            initializer=tf.ones_initializer(),
+            trainable=False,
+            name="{}/corrective_terms".format(self.embedding_name),
+            shape=(self.num_connections),
+        )
+
+    def update_corrective_terms(self, indices: List[int]):
+        corrective_terms_list = [self.config.corrective_factor if i in indices else 1.0 for i in range(self.num_connections)]
+        self.corrective_terms.assign(tf.convert_to_tensor(corrective_terms_list, dtype=tf.float32))
 
     def _load_connection_embedding_matrix(self):
         embeddings = tf.concat(
@@ -121,6 +131,9 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
             self.w(attention_embedding_matrix)
         )  # shape: (num_connections, 1)
         scores = tf.math.exp(scores)
+
+        if self.config.use_corrective_terms:
+            scores = tf.multiply(scores, self.corrective_terms[:,tf.newaxis])
 
         scores_per_feature = tf.ragged.stack_dynamic_partitions(
             scores,
