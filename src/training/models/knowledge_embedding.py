@@ -16,9 +16,8 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
         self.config = config
 
         self.num_features = len(knowledge.get_vocab())
-        self.num_hidden_features = len(knowledge.get_extended_vocab()) - len(
-            knowledge.get_vocab()
-        )
+        self.num_all_features = len(knowledge.get_extended_vocab())
+        self.num_hidden_features = self.num_all_features - self.num_features
 
         self.w = tf.keras.layers.Dense(
             self.config.attention_dim,
@@ -76,14 +75,32 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
                 self.connection_partition[i] = idx
             current_partition_begin = current_partition_end
 
-        self.connection_indices = [
-            v for _, v in sorted(self.connections.items(), key=lambda x: x[0])
-        ]  # connection_indices[i,j] = k -> feature i is connected to feature k
+        # Sorted by insertion order by default since Python 3.7
+        self.connection_indices = list(self.connections.values())
+        # exists j such that connection_indices[i][j] = k -> feature i is connected to feature k
+
         self.flattened_connection_indices = [
             x for sublist in self.connection_indices for x in sublist
         ]  # connection k is between connection_partition[k] and flattened_connection_indices[k]
         # connection_indices[i,j] = k -> connection_partition[l]=i, flattened_connection_indices[l]=k
         self.num_connections = len(self.flattened_connection_indices)
+
+    def _calculate_attention_distribution_lookups(self):
+        scores = self._calculate_raw_scores()
+
+        scores_per_outgoing_feature = tf.ragged.stack_dynamic_partitions(
+            scores,
+            partitions=self.connection_partition,
+            num_partitions=self.num_features
+        ) # shape: (num_features, num_connections per feature)
+
+        scores_per_incoming_feature = tf.ragged.stack_dynamic_partitions(
+            scores,
+            partitions=self.flattened_connection_indices,
+            num_partitions=self.num_all_features
+        ) # shape: (num_all_features, num_connections per feature)
+
+        return (self.connection_partition, self.flattened_connection_indices, scores, scores_per_outgoing_feature, scores_per_incoming_feature)
 
     def _init_corrective_terms(self):
         self.corrective_terms = self.add_weight(
@@ -123,8 +140,7 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
             name="concatenated_connection_embeddings",
         )  # (num_connections, 2*embedding_size)
 
-    def _calculate_attention_embeddings(self):
-        connection_embedding_matrix = self._load_connection_embedding_matrix()
+    def _calculate_raw_scores(self):
         attention_embedding_matrix = self._load_attention_embedding_matrix()
 
         scores = self.u(
@@ -134,6 +150,13 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
 
         if self.config.use_corrective_terms:
             scores = tf.multiply(scores, self.corrective_terms[:,tf.newaxis])
+        
+        return scores
+
+    def _calculate_attention_embeddings(self):
+        connection_embedding_matrix = self._load_connection_embedding_matrix()
+
+        scores = self._calculate_raw_scores()
 
         scores_per_feature = tf.ragged.stack_dynamic_partitions(
             scores,
