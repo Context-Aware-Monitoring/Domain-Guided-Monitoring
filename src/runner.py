@@ -1,8 +1,10 @@
+from src.features.knowledge.base import BaseKnowledge
 from src.features.sequences.transformer import SequenceMetadata
 from src.training import analysis, models
 from src.features import preprocessing, sequences, knowledge
 import pandas as pd
 import logging
+from src.training.models.base import BaseModel
 import tensorflow as tf
 from typing import Any, Tuple
 from .config import ExperimentConfig
@@ -12,6 +14,19 @@ from pathlib import Path
 import json
 import matplotlib.pyplot as plt
 
+class ExperimentRun:
+    metadata: SequenceMetadata
+    knowledge: BaseKnowledge
+    model: BaseModel
+    train_dataset: tf.data.Dataset
+    test_dataset: tf.data.Dataset
+
+    def __init__(self, metadata: SequenceMetadata, knowledge: BaseKnowledge, model: BaseModel, train_dataset: tf.data.Dataset, test_dataset: tf.data.Dataset):
+        self.metadata = metadata
+        self.knowledge = knowledge
+        self.model = model
+        self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
 
 class ExperimentRunner:
     sequence_df_pkl_file: str = "data/sequences_df.pkl"
@@ -41,20 +56,30 @@ class ExperimentRunner:
         (knowledge, model) = self._load_model(metadata)
         knowledge = self._build_model(metadata, knowledge, model)
 
-        model.train_dataset(
-            train_dataset,
-            test_dataset,
+        run = ExperimentRun(metadata, knowledge, model, train_dataset, test_dataset)
+        return self.continue_run(run)
+
+    def continue_run(self, run: ExperimentRun):
+        logging.info("Starting run %s", self.run_id)
+        tf.random.set_seed(self.config.tensorflow_seed)
+        random.seed(self.config.random_seed)
+
+        run.model.train_dataset(
+            run.train_dataset,
+            run.test_dataset,
             self.multilabel_classification,
-            self.config.n_epochs,
+            self.config.n_epochs
         )
 
-        self._log_dataset_info(train_dataset, test_dataset, metadata)
+        self._log_dataset_info(run.train_dataset, run.test_dataset, run.metadata)
         self._generate_artifacts(
-            metadata, train_dataset, test_dataset, knowledge, model
+            run.metadata, run.train_dataset, run.test_dataset, run.knowledge, run.model
         )
-        self._set_mlflow_tags(metadata)
+        self._set_mlflow_tags(run.metadata)
         plt.close("all")
         logging.info("Finished run %s", self.run_id)
+
+        return run
 
     def _log_dataset_info(
         self,

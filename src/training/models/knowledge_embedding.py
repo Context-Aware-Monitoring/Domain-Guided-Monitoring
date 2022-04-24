@@ -15,8 +15,9 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
         self.embedding_name = embedding_name
         self.config = config
 
+        self.extended_vocab = knowledge.get_extended_vocab()
         self.num_features = len(knowledge.get_vocab())
-        self.num_all_features = len(knowledge.get_extended_vocab())
+        self.num_all_features = len(self.extended_vocab)
         self.num_hidden_features = self.num_all_features - self.num_features
 
         self.w = tf.keras.layers.Dense(
@@ -58,22 +59,22 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
         logging.info("Initializing %s connection information", self.embedding_name)
         self.connections: Dict[int, List[int]] = {}
 
-        partition_length = [0] * self.num_features
+        self.partition_end = [0] * self.num_features
 
         for idx in range(self.num_features):
             connected_idxs = knowledge.get_connections_for_idx(idx)
             self.connections[idx] = sorted(list(connected_idxs))
-            partition_length[idx] = len(connected_idxs)
+            self.partition_end[idx] = self.partition_end[idx - 1] + len(connected_idxs)
 
-        self.connection_partition: List[int] = [0] * sum(partition_length)
+        self.connection_partition: List[int] = [0] * self.partition_end[-1]
         # connection_partition[i] = j -> {connection i relevant for j}
 
-        current_partition_begin = 0
         for idx in range(self.num_features):
-            current_partition_end = current_partition_begin + partition_length[idx]
-            for i in range(current_partition_begin, current_partition_end):
+            begin = self.partition_end[idx - 1] if idx > 0 else 0
+            end = self.partition_end[idx]
+
+            for i in range(begin, end):
                 self.connection_partition[i] = idx
-            current_partition_begin = current_partition_end
 
         # Sorted by insertion order by default since Python 3.7
         self.connection_indices = list(self.connections.values())
@@ -110,9 +111,24 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
             shape=(self.num_connections),
         )
 
-    def update_corrective_terms(self, indices: List[int]):
-        corrective_terms_list = [self.config.corrective_factor if i in indices else 1.0 for i in range(self.num_connections)]
-        self.corrective_terms.assign(tf.convert_to_tensor(corrective_terms_list, dtype=tf.float32))
+    def update_corrective_terms(self, connections: Dict[Tuple[str, str], float]):
+        # Ensure that connections that should not be corrected don't have any effect
+        term_list = [1.0] * self.num_connections
+
+        for ((outgoing, incoming), term) in connections.items():
+            index = self._get_connection_index_from_labels(outgoing, incoming)
+            term_list[index] = term
+
+        new_corrective_terms = tf.convert_to_tensor(term_list, dtype=tf.float32)
+        self.corrective_terms.assign(tf.multiply(self.corrective_terms, new_corrective_terms))
+
+    def _get_connection_index_from_labels(self, outgoing: str, incoming: str):
+        outgoing_idx = self.extended_vocab[outgoing]
+        incoming_idx = self.extended_vocab[incoming]
+
+        connection_offset = self.connections[outgoing_idx].index(incoming_idx)
+
+        return self.partition_end[outgoing_idx] + connection_offset
 
     def _load_connection_embedding_matrix(self):
         embeddings = tf.concat(

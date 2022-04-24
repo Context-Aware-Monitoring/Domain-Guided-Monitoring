@@ -17,6 +17,3 @@ class GramModel(BaseModel):
         self, metadata: SequenceMetadata, knowledge: HierarchyKnowledge
     ) -> GramEmbedding:
         return GramEmbedding(knowledge, self.config)
-
-    def update_corrective_terms(self, indices: List[int]):
-        self.embedding_layer.update_corrective_terms(indices)

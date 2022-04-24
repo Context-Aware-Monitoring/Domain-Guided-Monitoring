@@ -7,7 +7,9 @@ import pandas as pd
 import numpy as np
 import ast
 from tqdm import tqdm
-
+from src.runner import ExperimentRun
+from concurrent import futures
+from functools import partial
 
 class KnowledgeProcessor:
     def __init__(self, config: RefinementConfig):
@@ -37,11 +39,9 @@ class KnowledgeProcessor:
         self, input_feature: str, comparison_df: pd.DataFrame
     ) -> float:
         # refinement_metric > 0 -> comparison is better than base
-        relevant_df = comparison_df[
-            comparison_df["inputs"].apply(lambda x: input_feature + "," in x)
-        ].copy()
+        relevant_df = comparison_df.copy()
         if len(relevant_df) == 0:
-            return -1
+            return 0
         if self.config.refinement_metric_maxrank > 0:
             relevant_df["output_rank_base"] = relevant_df["output_rank_base"].apply(
                 lambda x: min(x, self.config.refinement_metric_maxrank)
@@ -74,7 +74,40 @@ class KnowledgeProcessor:
             return accuracy_comp - accuracy_base
 
         logging.error("Unknown refinement metric: %s", self.config.refinement_metric)
-        return -1
+        return 0
+
+    def _calculate_edge_comparison_for_edge(
+        self,
+        edge: Tuple[str, str],
+        attention_comp: Dict[str, Dict[str, float]],
+        train_frequency: Dict[str, Dict[str, float]],
+        comparison_df: pd.DataFrame):
+        (c, p) = edge
+
+        if c == p:
+            return None
+
+        relevant_df = comparison_df[
+            comparison_df["inputs"].apply(lambda x: c + "," in x)
+        ]
+        if len(relevant_df) == 0:
+            return None
+
+        edge_weight = attention_comp.get(c, {}).get(p, -1)
+        if float(edge_weight) < self.config.min_edge_weight:
+            return None
+
+        frequency = train_frequency.get(c, {}).get("absolue_frequency", 0.0)
+        if frequency > self.config.max_train_examples:
+            return None
+
+        return {
+            "child": c,
+            "parent": p,
+            "refinement_metric": self._calculate_refinement_metric(
+                c, relevant_df
+            )
+        }
 
     def _calculate_edge_comparison(
         self,
@@ -88,33 +121,18 @@ class KnowledgeProcessor:
         )
 
         records = []
-        for c, p in tqdm(added_edges):
-            if c == p:
-                continue
+        with futures.ProcessPoolExecutor() as pool:
+            for record in pool.map(
+                partial(
+                    self._calculate_edge_comparison_for_edge,
+                    attention_comp=attention_comp,
+                    train_frequency=train_frequency,
+                    comparison_df=comparison_df
+                ), added_edges, chunksize=256
+            ):
+                if record is not None:
+                    records.append(record)
 
-            relevant_df = comparison_df[
-                comparison_df["inputs"].apply(lambda x: c + "," in x)
-            ]
-            if len(relevant_df) == 0:
-                continue
-
-            edge_weight = attention_comp.get(c, {}).get(p, -1)
-            if float(edge_weight) < self.config.min_edge_weight:
-                continue
-
-            frequency = train_frequency.get(c, {}).get("absolue_frequency", 0.0)
-            if frequency > self.config.max_train_examples:
-                continue
-
-            records.append(
-                {
-                    "child": c,
-                    "parent": p,
-                    "refinement_metric": self._calculate_refinement_metric(
-                        c, relevant_df
-                    ),
-                }
-            )
         return pd.DataFrame.from_records(
             records, columns=["child", "parent", "refinement_metric"]
         )
@@ -160,6 +178,49 @@ class KnowledgeProcessor:
                 refined_knowledge[child].append(parent)
 
         return refined_knowledge
+
+    def update_corrective_terms(self, run: ExperimentRun, refinement_run_id: str, reference_run_id: str):
+        logging.info("Starting update of corrective terms")
+        attention_base = self._load_attention_weights(reference_run_id)
+        attention_comp = self._load_attention_weights(refinement_run_id)
+        train_frequency = self._load_input_frequency_dict(refinement_run_id)
+        comparison_df = self._load_comparison_df(
+            run_id_base=reference_run_id, run_id_comp=refinement_run_id
+        )
+
+        edge_comparison_df = self._calculate_edge_comparison(
+            attention_base=attention_base,
+            attention_comp=attention_comp,
+            train_frequency=train_frequency,
+            comparison_df=comparison_df
+        )
+
+        edge_comparison_df = (
+            edge_comparison_df[
+                edge_comparison_df["refinement_metric"] # Only allow edges that decrease performance
+                < self.config.max_refinement_metric
+            ]
+            .sort_values(by="refinement_metric", ascending=True)
+            .head(n=self.config.max_edges_to_remove)
+        )
+
+        edge_comparison_df["refinement_metric"] = edge_comparison_df["refinement_metric"].apply(
+            lambda x: np.exp(self.config.corrective_factor * x)
+        )
+
+        edges_to_correct: Dict[Tuple[str, str], float] = {}
+
+        for _, row in edge_comparison_df.iterrows():
+            edges_to_correct[(row["child"], row["parent"])] = row["refinement_metric"]
+
+        logging.info("Updating corrective terms for %d edges", len(edges_to_correct))
+
+        file_path = Path(
+            self.config.mlflow_dir + "{run_id}/artifacts/edge_comparison.pkl".format(run_id=refinement_run_id)
+        )
+        edge_comparison_df.to_pickle(file_path)
+
+        run.model.embedding_layer.update_corrective_terms(edges_to_correct)
 
     def _load_attention_weights(self, run_id):
         attention_path = Path(

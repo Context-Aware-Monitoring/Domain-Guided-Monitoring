@@ -17,3 +17,4 @@ class RefinementConfig:
     edges_to_add: float = -1
     reference_file_knowledge: Path = Path("data/reference_file_knowledge.json")
     mlflow_dir: str = "mlruns/1/"
+    corrective_factor: float = 0.2

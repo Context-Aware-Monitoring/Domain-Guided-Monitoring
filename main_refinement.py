@@ -6,6 +6,9 @@ import time
 from typing import Dict, List
 from mlflow.tracking import MlflowClient
 import random
+from src.main import _log_all_configs_to_mlflow
+from src import ExperimentRunner
+import mlflow
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("matplotlib.font_manager").disabled = True
@@ -85,6 +88,47 @@ def _add_mlflow_tag(run_id: str, refinement_timestamp: int, suffix: str):
         ),
     )
 
+def main_boosting():
+    mlflow.set_experiment("Domain Guided Monitoring")
+
+    refinement_timestamp = time.time()
+    refinement_config = refinement.RefinementConfig()
+    _ = _write_reference_knowledge(refinement_config)
+    reference_run_id = _main() # Reference run without domain knowledge
+    _add_mlflow_tag(reference_run_id, refinement_timestamp, suffix="reference")
+
+    refinement_run_ids = []
+
+    with mlflow.start_run() as run:
+        _log_all_configs_to_mlflow()
+        runner = ExperimentRunner(run.info.run_id)
+        runner.config.model_type = "gram" # Manually overwrite to get proper knowledge
+        experiment_run = runner.run() # Original run as baseline
+        refinement_run_id = run.info.run_id
+
+    _add_mlflow_tag(refinement_run_id, refinement_timestamp, suffix="original")
+    original_run_id = refinement_run_id
+    refinement_run_ids = []
+
+    for i in range(refinement_config.num_refinements):
+        refinement.KnowledgeProcessor(refinement_config).update_corrective_terms(experiment_run, refinement_run_id, reference_run_id)
+        experiment_run.model.prediction_model.trainable = False
+
+        with mlflow.start_run() as run:
+            _log_all_configs_to_mlflow()
+            runner = ExperimentRunner(run.info.run_id)
+            runner.config.n_epochs = 1 # Lower epoch because weights are frozen anyway
+            experiment_run = runner.continue_run(experiment_run)
+            refinement_run_id = run.info.run_id
+            _add_mlflow_tag(refinement_run_id, refinement_timestamp, suffix="refinement_" + str(i))
+            refinement_run_ids = refinement_run_ids + [refinement_run_id]
+
+    logging.info("Finished boosting run")
+    logging.info("reference run id: {reference_run_id}".format(reference_run_id=reference_run_id))
+    logging.info("original run id: {original_run_id}".format(original_run_id=original_run_id))
+
+    for run in refinement_run_ids:
+        logging.info("refinement run id: {refinement_run_id}".format(refinement_run_id=run))
 
 def main_refinement():
     refinement_timestamp = time.time()
@@ -120,6 +164,6 @@ def main_refinement():
         )
         num_refinement_connections = num_new_refinement_connections
 
-
 if __name__ == "__main__":
-    main_refinement()
+    #main_refinement()
+    main_boosting()

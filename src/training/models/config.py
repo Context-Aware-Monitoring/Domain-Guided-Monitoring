@@ -33,7 +33,6 @@ class ModelConfig:
         default_factory=lambda: []
     )
     use_corrective_terms: bool = True
-    corrective_factor: float = 0.0
 
 
 @dataclass_cli.add
