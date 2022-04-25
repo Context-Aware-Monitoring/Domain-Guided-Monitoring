@@ -18,3 +18,5 @@ class RefinementConfig:
     reference_file_knowledge: Path = Path("data/reference_file_knowledge.json")
     mlflow_dir: str = "mlruns/1/"
     corrective_factor: float = 0.2
+    original_run_id: str = ""
+    reference_run_id: str = ""

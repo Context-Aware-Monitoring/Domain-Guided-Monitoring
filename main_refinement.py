@@ -88,14 +88,53 @@ def _add_mlflow_tag(run_id: str, refinement_timestamp: int, suffix: str):
         ),
     )
 
+
+def _add_mlflow_tags_for_new_run(run_id: str, refinement_timestamp: int, type: str):
+    mlflow_client = MlflowClient()
+    mlflow_client.set_tag(
+        run_id=run_id,
+        key="refinement_run",
+        value=str(refinement_timestamp)
+    )
+    mlflow_client.set_tag(
+        run_id=run_id,
+        key="refinement_type",
+        value=type
+    )
+
+
+def _add_mlflow_tags_for_refinement(run_id: str, refinement_timestamp: int, index: int, config: refinement.RefinementConfig):
+    _add_mlflow_tags_for_new_run(run_id, refinement_timestamp, "refinement_{index}".format(index=str(index)))
+    mlflow_client = MlflowClient()
+    mlflow_client.set_tag(
+        run_id=run_id,
+        key="refinement_reference_id",
+        value=config.reference_run_id
+    )
+    mlflow_client.set_tag(
+        run_id=run_id,
+        key="refinement_original_id",
+        value=config.original_run_id
+    )
+
+
+def _do_reference_run(timestamp: int, config: refinement.RefinementConfig):
+    if len(config.reference_run_id) > 0:
+        return config.reference_run_id
+    else:
+        _write_reference_knowledge(config)
+        reference_run_id = _main()
+        _add_mlflow_tags_for_new_run(reference_run_id.info.run_id, timestamp, "reference")
+        return reference_run_id
+
+
 def main_boosting():
     mlflow.set_experiment("Domain Guided Monitoring")
 
     refinement_timestamp = time.time()
     refinement_config = refinement.RefinementConfig()
-    _ = _write_reference_knowledge(refinement_config)
-    reference_run_id = _main() # Reference run without domain knowledge
-    _add_mlflow_tag(reference_run_id, refinement_timestamp, suffix="reference")
+
+    reference_run_id = _do_reference_run(refinement_timestamp, refinement_config)
 
     refinement_run_ids = []
 
@@ -106,7 +145,7 @@ def main_boosting():
         experiment_run = runner.run() # Original run as baseline
         refinement_run_id = run.info.run_id
 
-    _add_mlflow_tag(refinement_run_id, refinement_timestamp, suffix="original")
+    _add_mlflow_tags_for_new_run(refinement_run_id, refinement_timestamp, "original")
     original_run_id = refinement_run_id
     refinement_run_ids = []
 
@@ -120,7 +159,7 @@ def main_boosting():
             runner.config.n_epochs = 1 # Lower epoch because weights are frozen anyway
             experiment_run = runner.continue_run(experiment_run)
             refinement_run_id = run.info.run_id
-            _add_mlflow_tag(refinement_run_id, refinement_timestamp, suffix="refinement_" + str(i))
+            _add_mlflow_tags_for_refinement(refinement_run_id, refinement_timestamp, i, refinement_config)
             refinement_run_ids = refinement_run_ids + [refinement_run_id]
 
     logging.info("Finished boosting run")
@@ -162,7 +201,7 @@ def main_refinement():
         _add_mlflow_tag(
             refinement_run_id, refinement_timestamp, suffix="refinement_" + str(i)
         )
-        num_refinement_connections = num_new_refinement_connections
+        num_refinement_connections = num_new_refinement_connections    
 
 if __name__ == "__main__":
     #main_refinement()
