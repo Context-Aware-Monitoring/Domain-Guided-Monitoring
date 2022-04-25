@@ -124,7 +124,7 @@ def _do_reference_run(timestamp: int, config: refinement.RefinementConfig):
     else:
         _write_reference_knowledge(config)
         reference_run_id = _main()
-        _add_mlflow_tags_for_new_run(reference_run_id.info.run_id, timestamp, "reference")
+        _add_mlflow_tags_for_new_run(reference_run_id, timestamp, "reference")
         return reference_run_id
 
 
