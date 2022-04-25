@@ -1,5 +1,6 @@
 from src.features.knowledge.base import BaseKnowledge
 import tensorflow as tf
+from tensorflow.python.training.tracking.data_structures import NoDependency
 from typing import List, Dict, Tuple
 from .config import ModelConfig
 from .base import BaseEmbedding
@@ -34,6 +35,13 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
         self._init_connection_information(knowledge)
         self._init_corrective_terms()
 
+    def get_weights(self):
+        self.w.get_weights()
+        self.u.get_weights()
+
+    def set_weights(self, weights):
+        pass
+
     def _init_basic_embedding_variables(self, knowledge: BaseKnowledge):
         logging.info("Initializing %s basic embedding variables", self.embedding_name)
         self.basic_feature_embeddings = self.add_weight(
@@ -57,7 +65,7 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
 
     def _init_connection_information(self, knowledge: BaseKnowledge):
         logging.info("Initializing %s connection information", self.embedding_name)
-        self.connections: Dict[int, List[int]] = {}
+        self.connections: Dict[int, List[int]] = NoDependency({})
 
         self.partition_end = [0] * self.num_features
 

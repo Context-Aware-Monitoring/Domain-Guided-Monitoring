@@ -24,6 +24,6 @@ def _main() -> str:
     mlflow.set_experiment("Domain Guided Monitoring")
     with mlflow.start_run() as run:
         _log_all_configs_to_mlflow()
-        runner = ExperimentRunner(run.info.run_id)
-        runner.run()
+        runner = ExperimentRunner()
+        runner.run(run.info.run_id)
         return run.info.run_id

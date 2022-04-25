@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 import ast
 from tqdm import tqdm
-from src.runner import ExperimentRun
+from src.runner import RunState
 from concurrent import futures
 from functools import partial
 
@@ -184,7 +184,7 @@ class KnowledgeProcessor:
 
         return refined_knowledge
 
-    def update_corrective_terms(self, run: ExperimentRun, refinement_run_id: str, reference_run_id: str):
+    def update_corrective_terms(self, run: RunState, refinement_run_id: str, reference_run_id: str):
         logging.info("Starting update of corrective terms")
         attention_base = self._load_attention_weights(reference_run_id)
         attention_comp = self._load_attention_weights(refinement_run_id)
@@ -226,6 +226,7 @@ class KnowledgeProcessor:
         edge_comparison_df.to_pickle(file_path)
 
         run.model.embedding_layer.update_corrective_terms(edges_to_correct)
+        run.model.prediction_model.trainable = False
 
     def _load_attention_weights(self, run_id):
         attention_path = Path(

@@ -3,12 +3,13 @@ from src import _main
 from src import features, refinement
 import json
 import time
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from mlflow.tracking import MlflowClient
 import random
 from src.main import _log_all_configs_to_mlflow
-from src import ExperimentRunner
+from src import ExperimentRunner, RunState
 import mlflow
+from pathlib import Path
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("matplotlib.font_manager").disabled = True
@@ -118,7 +119,7 @@ def _add_mlflow_tags_for_refinement(run_id: str, refinement_timestamp: int, inde
     )
 
 
-def _do_reference_run(timestamp: int, config: refinement.RefinementConfig):
+def _do_reference_run(timestamp: int, config: refinement.RefinementConfig) -> str:
     if len(config.reference_run_id) > 0:
         return config.reference_run_id
     else:
@@ -128,6 +129,27 @@ def _do_reference_run(timestamp: int, config: refinement.RefinementConfig):
         return reference_run_id
 
 
+def _do_original_run(timestamp: int, config: refinement.RefinementConfig) -> Tuple[str, RunState]:
+    if len(config.original_run_id) > 0:
+        original_run_id = config.original_run_id
+        state = ExperimentRunner().prepare_run()
+        weights_path = Path(
+            config.mlflow_dir
+            + "{run_id}/artifacts/trained_weights.h5".format(run_id=original_run_id)
+        )
+        state.model.prediction_model.load_weights(weights_path)
+        return (original_run_id, state)
+    else:
+        with mlflow.start_run() as run:
+            original_run_id = run.info.run_id
+            _log_all_configs_to_mlflow()
+            runner = ExperimentRunner()
+            runner.config.model_type = "gram" # Manually overwrite to get proper knowledge
+            state = runner.run(original_run_id)
+            _add_mlflow_tags_for_new_run(original_run_id, timestamp, "original")
+            return (original_run_id, state)
+
+
 def main_boosting():
     mlflow.set_experiment("Domain Guided Monitoring")
 
@@ -135,39 +157,36 @@ def main_boosting():
     refinement_config = refinement.RefinementConfig()
 
     reference_run_id = _do_reference_run(refinement_timestamp, refinement_config)
+    (original_run_id, state) = _do_original_run(refinement_timestamp, refinement_config)
 
-    refinement_run_ids = []
+    refinement_run_ids = [original_run_id]
 
-    with mlflow.start_run() as run:
-        _log_all_configs_to_mlflow()
-        runner = ExperimentRunner(run.info.run_id)
-        runner.config.model_type = "gram" # Manually overwrite to get proper knowledge
-        experiment_run = runner.run() # Original run as baseline
-        refinement_run_id = run.info.run_id
-
-    _add_mlflow_tags_for_new_run(refinement_run_id, refinement_timestamp, "original")
-    original_run_id = refinement_run_id
-    refinement_run_ids = []
+    processor = refinement.KnowledgeProcessor(refinement_config)
+    runner = ExperimentRunner()
+    runner.config.n_epochs = 1 # Lower epoch because weights are currently frozen anyway
 
     for i in range(refinement_config.num_refinements):
-        refinement.KnowledgeProcessor(refinement_config).update_corrective_terms(experiment_run, refinement_run_id, reference_run_id)
-        experiment_run.model.prediction_model.trainable = False
+        processor.update_corrective_terms(state, refinement_run_ids[-1], reference_run_id)
 
         with mlflow.start_run() as run:
+            current_run_id = run.info.run_id
             _log_all_configs_to_mlflow()
-            runner = ExperimentRunner(run.info.run_id)
-            runner.config.n_epochs = 1 # Lower epoch because weights are frozen anyway
-            experiment_run = runner.continue_run(experiment_run)
-            refinement_run_id = run.info.run_id
-            _add_mlflow_tags_for_refinement(refinement_run_id, refinement_timestamp, i, refinement_config)
-            refinement_run_ids = refinement_run_ids + [refinement_run_id]
+            state = runner.run_from_state(current_run_id, state)
+            _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, i, refinement_config)
+            refinement_run_ids.append(current_run_id)
+
+        logging.info(
+            "Completed boosting iteration {current} of {total}"
+            .format(current=i+1, total=refinement_config.num_refinements)
+        )
 
     logging.info("Finished boosting run")
     logging.info("reference run id: {reference_run_id}".format(reference_run_id=reference_run_id))
     logging.info("original run id: {original_run_id}".format(original_run_id=original_run_id))
 
-    for run in refinement_run_ids:
+    for run in refinement_run_ids[1:]:
         logging.info("refinement run id: {refinement_run_id}".format(refinement_run_id=run))
+
 
 def main_refinement():
     refinement_timestamp = time.time()

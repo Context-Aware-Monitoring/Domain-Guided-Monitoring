@@ -14,14 +14,21 @@ from pathlib import Path
 import json
 import matplotlib.pyplot as plt
 
-class ExperimentRun:
+class RunState:
     metadata: SequenceMetadata
     knowledge: BaseKnowledge
     model: BaseModel
     train_dataset: tf.data.Dataset
     test_dataset: tf.data.Dataset
 
-    def __init__(self, metadata: SequenceMetadata, knowledge: BaseKnowledge, model: BaseModel, train_dataset: tf.data.Dataset, test_dataset: tf.data.Dataset):
+    def __init__(
+        self,
+        metadata: SequenceMetadata,
+        knowledge: BaseKnowledge,
+        model: BaseModel,
+        train_dataset: tf.data.Dataset,
+        test_dataset: tf.data.Dataset
+    ):
         self.metadata = metadata
         self.knowledge = knowledge
         self.model = model
@@ -31,13 +38,12 @@ class ExperimentRun:
 class ExperimentRunner:
     sequence_df_pkl_file: str = "data/sequences_df.pkl"
 
-    def __init__(self, run_id: str):
-        self.run_id = run_id
+    def __init__(self):
         self.config = ExperimentConfig()
         self.multilabel_classification = self.config.multilabel_classification
 
-    def run(self):
-        logging.info("Starting run %s", self.run_id)
+    def prepare_run(self):
+        logging.info("Preparing run")
         tf.random.set_seed(self.config.tensorflow_seed)
         random.seed(self.config.random_seed)
         sequence_df = self._load_sequences()
@@ -55,31 +61,42 @@ class ExperimentRunner:
         (train_dataset, test_dataset) = self._create_dataset(sequence_df)
         (knowledge, model) = self._load_model(metadata)
         knowledge = self._build_model(metadata, knowledge, model)
+        return RunState(metadata, knowledge, model, train_dataset, test_dataset)
 
-        run = ExperimentRun(metadata, knowledge, model, train_dataset, test_dataset)
-        return self.continue_run(run)
+    def run(self, run_id: str) -> RunState:
+        state = self.prepare_run()
+        return self.run_from_state(run_id, state)
 
-    def continue_run(self, run: ExperimentRun):
+    def run_from_state(self, run_id: str, state: RunState) -> RunState:
+        self.run_id = run_id
         logging.info("Starting run %s", self.run_id)
         tf.random.set_seed(self.config.tensorflow_seed)
         random.seed(self.config.random_seed)
 
-        run.model.train_dataset(
-            run.train_dataset,
-            run.test_dataset,
+        state.model.train_dataset(
+            state.train_dataset,
+            state.test_dataset,
             self.multilabel_classification,
             self.config.n_epochs
         )
 
-        self._log_dataset_info(run.train_dataset, run.test_dataset, run.metadata)
-        self._generate_artifacts(
-            run.metadata, run.train_dataset, run.test_dataset, run.knowledge, run.model
+        self._log_dataset_info(
+            state.train_dataset,
+            state.test_dataset,
+            state.metadata
         )
-        self._set_mlflow_tags(run.metadata)
+        self._generate_artifacts(
+            state.metadata,
+            state.train_dataset,
+            state.test_dataset,
+            state.knowledge,
+            state.model
+        )
+        self._set_mlflow_tags(state.metadata)
         plt.close("all")
         logging.info("Finished run %s", self.run_id)
 
-        return run
+        return state
 
     def _log_dataset_info(
         self,
@@ -117,6 +134,7 @@ class ExperimentRunner:
         self._generate_embedding_artifacts(artifact_dir, knowledge, model)
         self._generate_confusion_artifacts(artifact_dir, metadata, model, test_dataset)
         self._generate_frequency_artifacts(artifact_dir, metadata, train_dataset)
+        self._generate_weight_artifacts(artifact_dir, model)
         mlflow.log_artifacts(artifact_dir)
 
     def _generate_metric_artifacts(
@@ -175,6 +193,11 @@ class ExperimentRunner:
             embedding_helper.write_attention_weights(
                 file_name=artifact_dir + "attention.json",
             )
+
+    def _generate_weight_artifacts(
+        self, artifact_dir: str, model: models.BaseModel
+    ):
+        model.prediction_model.save_weights(artifact_dir + "trained_weights.h5")
 
     def _create_dataset(
         self, sequence_df: pd.DataFrame
