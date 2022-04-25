@@ -35,13 +35,6 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
         self._init_connection_information(knowledge)
         self._init_corrective_terms()
 
-    def get_weights(self):
-        self.w.get_weights()
-        self.u.get_weights()
-
-    def set_weights(self, weights):
-        pass
-
     def _init_basic_embedding_variables(self, knowledge: BaseKnowledge):
         logging.info("Initializing %s basic embedding variables", self.embedding_name)
         self.basic_feature_embeddings = self.add_weight(
