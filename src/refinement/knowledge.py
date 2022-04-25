@@ -104,7 +104,7 @@ class KnowledgeProcessor:
         return {
             "child": c,
             "parent": p,
-            "refinement_metric": self._calculate_refinement_metric(
+            "child_metric": self._calculate_refinement_metric(
                 c, relevant_df
             )
         }
@@ -133,9 +133,14 @@ class KnowledgeProcessor:
                 if record is not None:
                     records.append(record)
 
-        return pd.DataFrame.from_records(
-            records, columns=["child", "parent", "refinement_metric"]
+        metric_df = pd.DataFrame.from_records(
+            records, columns=["child", "parent", "child_metric"]
         )
+        parent_metric_df = metric_df.groupby("parent")["child_metric"].mean().reset_index(name="parent_metric")
+        metric_df = metric_df.merge(parent_metric_df, on="parent")
+        metric_df["refinement_metric"]= metric_df.apply(lambda x: np.mean([x["child_metric"], x["parent_metric"]]), axis=1)
+        return metric_df
+
 
     def load_refined_knowledge(
         self, refinement_run_id: str, reference_run_id: str
@@ -204,14 +209,14 @@ class KnowledgeProcessor:
             .head(n=self.config.max_edges_to_remove)
         )
 
-        edge_comparison_df["refinement_metric"] = edge_comparison_df["refinement_metric"].apply(
+        edge_comparison_df["refinement_score"] = edge_comparison_df["refinement_metric"].apply(
             lambda x: np.exp(self.config.corrective_factor * x)
         )
 
         edges_to_correct: Dict[Tuple[str, str], float] = {}
 
         for _, row in edge_comparison_df.iterrows():
-            edges_to_correct[(row["child"], row["parent"])] = row["refinement_metric"]
+            edges_to_correct[(row["child"], row["parent"])] = row["refinement_score"]
 
         logging.info("Updating corrective terms for %d edges", len(edges_to_correct))
 
