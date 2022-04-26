@@ -9,7 +9,6 @@ import random
 from src.main import _log_all_configs_to_mlflow
 from src import ExperimentRunner, RunState
 import mlflow
-from pathlib import Path
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("matplotlib.font_manager").disabled = True
@@ -133,7 +132,7 @@ def _do_original_run(timestamp: int, config: refinement.RefinementConfig) -> Tup
     if len(config.original_run_id) > 0:
         original_run_id = config.original_run_id
         state = ExperimentRunner().prepare_run()
-        weights_path = Path(
+        weights_path = (
             config.mlflow_dir
             + "{run_id}/artifacts/trained_weights.h5".format(run_id=original_run_id)
         )
@@ -147,7 +146,7 @@ def _do_original_run(timestamp: int, config: refinement.RefinementConfig) -> Tup
             runner.config.model_type = "gram" # Manually overwrite to get proper knowledge
             state = runner.run(original_run_id)
             _add_mlflow_tags_for_new_run(original_run_id, timestamp, "original")
-            return (original_run_id, state)
+        return (original_run_id, state)
 
 
 def main_boosting():
@@ -166,10 +165,9 @@ def main_boosting():
     runner.config.n_epochs = 1 # Lower epoch because weights are currently frozen anyway
 
     for i in range(refinement_config.num_refinements):
-        processor.update_corrective_terms(state, refinement_run_ids[-1], reference_run_id)
-
-        with mlflow.start_run() as run:
+        with mlflow.active_run() or mlflow.start_run() as run:
             current_run_id = run.info.run_id
+            processor.update_corrective_terms(current_run_id, state, refinement_run_ids[-1], reference_run_id)
             _log_all_configs_to_mlflow()
             state = runner.run_from_state(current_run_id, state)
             _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, i, refinement_config)

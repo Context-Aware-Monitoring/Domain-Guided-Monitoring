@@ -184,7 +184,7 @@ class KnowledgeProcessor:
 
         return refined_knowledge
 
-    def update_corrective_terms(self, run: RunState, refinement_run_id: str, reference_run_id: str):
+    def update_corrective_terms(self, current_run_id: str, run: RunState, refinement_run_id: str, reference_run_id: str):
         logging.info("Starting update of corrective terms")
         attention_base = self._load_attention_weights(reference_run_id)
         attention_comp = self._load_attention_weights(refinement_run_id)
@@ -221,7 +221,7 @@ class KnowledgeProcessor:
         logging.info("Updating corrective terms for %d edges", len(edges_to_correct))
 
         file_path = Path(
-            self.config.mlflow_dir + "{run_id}/artifacts/edge_comparison.pkl".format(run_id=refinement_run_id)
+            self.config.mlflow_dir + "{run_id}/artifacts/edge_comparison.pkl".format(run_id=current_run_id)
         )
         edge_comparison_df.to_pickle(file_path)
 
