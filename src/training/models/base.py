@@ -119,6 +119,8 @@ class BaseModel:
 
         with self.strategy.scope():
             self.embedding_layer = self._get_embedding_layer(metadata, knowledge)
+            self.rnn_layer = self._get_rnn_layer()
+            self.activation_layer = self._get_activation_layer()
             self._log_embedding_stats()
             self.prediction_model = tf.keras.models.Sequential(
                 [
@@ -127,17 +129,11 @@ class BaseModel:
                     ),
                     self.embedding_layer,
                     tf.keras.layers.Masking(mask_value=0),
-                    self._get_rnn_layer(),
+                    self.rnn_layer,
                     tf.keras.layers.Dropout(
                         rate=self.config.dropout_rate, seed=self.config.dropout_seed
                     ),
-                    tf.keras.layers.Dense(
-                        len(metadata.y_vocab),
-                        activation=self.config.final_activation_function,
-                        kernel_regularizer=self.embedding_layer._get_kernel_regularizer(
-                            scope="prediction_dense"
-                        ),
-                    ),
+                    self.activation_layer,
                 ]
             )
 
@@ -147,6 +143,15 @@ class BaseModel:
             "num_hidden_features", self.embedding_layer.num_hidden_features
         )
         mlflow.log_metric("num_connections", self.embedding_layer.num_connections)
+
+    def _get_activation_layer(self):
+        return tf.keras.layers.Dense(
+            len(self.metadata.y_vocab),
+            activation=self.config.final_activation_function,
+            kernel_regularizer=self.embedding_layer._get_kernel_regularizer(
+                scope="prediction_dense"
+            ),
+        )
 
     def _get_rnn_layer(self):
         if self.config.rnn_type == "rnn":

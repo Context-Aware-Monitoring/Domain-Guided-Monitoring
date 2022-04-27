@@ -184,7 +184,14 @@ class KnowledgeProcessor:
 
         return refined_knowledge
 
-    def update_corrective_terms(self, current_run_id: str, run: RunState, refinement_run_id: str, reference_run_id: str):
+    def update_corrective_terms(
+        self,
+        index: int,
+        current_run_id: str,
+        run: RunState,
+        refinement_run_id: str,
+        reference_run_id: str
+    ):
         logging.info("Starting update of corrective terms")
         attention_base = self._load_attention_weights(reference_run_id)
         attention_comp = self._load_attention_weights(refinement_run_id)
@@ -226,7 +233,14 @@ class KnowledgeProcessor:
         edge_comparison_df.to_pickle(file_path)
 
         run.model.embedding_layer.update_corrective_terms(edges_to_correct)
-        run.model.prediction_model.trainable = False
+
+        run.model.rnn_layer.trainable = self._is_trainable(self.config.freeze_rnn_sequence, index)
+        run.model.embedding_layer.trainable = self._is_trainable(self.config.freeze_embeddings_sequence, index)
+        run.model.activation_layer.trainable = self._is_trainable(self.config.freeze_activation_sequence, index)
+
+    def _is_trainable(self, sequence: List[bool], index: int) -> bool:
+        # Sequence stores True if frozen, therefore negate
+        return not sequence[min(index, len(sequence) - 1)]
 
     def _load_attention_weights(self, run_id):
         attention_path = Path(

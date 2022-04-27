@@ -169,7 +169,7 @@ def main_boosting():
     for i in range(refinement_config.num_refinements):
         with mlflow.active_run() or mlflow.start_run() as run:
             current_run_id = run.info.run_id
-            processor.update_corrective_terms(current_run_id, state, refinement_run_ids[-1], reference_run_id)
+            processor.update_corrective_terms(i, current_run_id, state, refinement_run_ids[-1], reference_run_id)
             _log_all_configs_to_mlflow()
             state = runner.run_from_state(current_run_id, state)
             _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, i, refinement_config)
