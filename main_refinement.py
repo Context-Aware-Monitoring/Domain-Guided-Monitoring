@@ -144,7 +144,6 @@ def _do_original_run(timestamp: int, config: refinement.RefinementConfig) -> Tup
             original_run_id = run.info.run_id
             _log_all_configs_to_mlflow()
             runner = ExperimentRunner()
-            runner.config.model_type = "gram" # Manually overwrite to get proper knowledge
             state = runner.run(original_run_id)
             _add_mlflow_tags_for_new_run(original_run_id, timestamp, "original")
 
@@ -166,7 +165,6 @@ def main_boosting():
 
     processor = refinement.KnowledgeProcessor(refinement_config)
     runner = ExperimentRunner()
-    runner.config.n_epochs = 1 # Lower epoch because weights are currently frozen anyway
 
     for i in range(refinement_config.num_refinements):
         with mlflow.active_run() or mlflow.start_run() as run:
