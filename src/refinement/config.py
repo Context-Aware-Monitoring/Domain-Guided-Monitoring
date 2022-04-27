@@ -20,3 +20,4 @@ class RefinementConfig:
     corrective_factor: float = 0.2
     original_run_id: str = ""
     reference_run_id: str = ""
+    keep_state_from_original: bool = False
