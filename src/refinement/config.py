@@ -22,12 +22,12 @@ class RefinementConfig:
     original_run_id: str = ""
     reference_run_id: str = ""
     keep_state_from_original: bool = False
-    freeze_rnn_sequence: List[bool] = dataclasses.field(
-        default_factory=lambda: [True]
+    freeze_rnn_sequence: List[int] = dataclasses.field(
+        default_factory=lambda: [1] # Use int because argparse doesn't handle bool correctly
     )
-    freeze_embeddings_sequence: List[bool] = dataclasses.field(
-        default_factory=lambda: [True]
+    freeze_embeddings_sequence: List[int] = dataclasses.field(
+        default_factory=lambda: [1]
     )
-    freeze_activation_sequence: List[bool] = dataclasses.field(
-        default_factory=lambda: [True]
+    freeze_activation_sequence: List[int] = dataclasses.field(
+        default_factory=lambda: [1]
     )

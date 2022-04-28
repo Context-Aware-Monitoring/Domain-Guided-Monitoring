@@ -238,9 +238,9 @@ class KnowledgeProcessor:
         run.model.embedding_layer.trainable = self._is_trainable(self.config.freeze_embeddings_sequence, index)
         run.model.activation_layer.trainable = self._is_trainable(self.config.freeze_activation_sequence, index)
 
-    def _is_trainable(self, sequence: List[bool], index: int) -> bool:
-        # Sequence stores True if frozen, therefore negate
-        return not sequence[min(index, len(sequence) - 1)]
+    def _is_trainable(self, sequence: List[int], index: int) -> bool:
+        # Sequence stores True (=1) if frozen, therefore negate
+        return False if sequence[min(index, len(sequence) - 1)] == 1 else True
 
     def _load_attention_weights(self, run_id):
         attention_path = Path(
