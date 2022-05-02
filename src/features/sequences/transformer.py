@@ -357,7 +357,7 @@ class NextSequenceTransformer:
             )
             .tolist()
         )
-        flattened_sequences = list(
+        flattened_sequences = sorted(
             set([item for sublist in flattened_sequences for item in sublist])
         )
         return self._generate_vocab_from_list(flattened_sequences)

@@ -52,7 +52,7 @@ class HierarchyKnowledge(BaseKnowledge):
         self.extended_vocab: Dict[str, int] = {}
         self.nodes: Dict[int, Node] = {}
 
-        labels_to_handle = list(vocab.keys())
+        labels_to_handle = sorted(vocab.keys())
         max_index = max(vocab.values())
         while len(labels_to_handle) > 0:
             label = labels_to_handle.pop()
@@ -80,7 +80,7 @@ class HierarchyKnowledge(BaseKnowledge):
                 label_names=label_names,
             )
 
-            parents = list(set(parents_df[self.parent_id_col]))
+            parents = sorted(set(parents_df[self.parent_id_col]))
             labels_to_handle = labels_to_handle + parents
 
         self.extra_vocab: Dict[str, int] = {
