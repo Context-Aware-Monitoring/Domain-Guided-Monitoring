@@ -26,33 +26,56 @@ class HierarchyKnowledge(BaseKnowledge):
         return set(self.nodes[idx].get_ancestor_label_idxs() + [idx])
 
     def is_connected(self, child: str, parent: str) -> bool:
-        if self.hierarchy_mapping_df is None:
+        if self.mapping_table is None:
             return super().is_connected(child, parent)
 
-        # Resolve connections across different levels for mimic
-        child_idx = self.vocab[child]
-
-        (child_level, _) = child.split("#")
-        (parent_level, parent_id) = parent.split("#")
-
-        connected_nodes = set(self.nodes[child_idx].get_ancestors() + [self.nodes[child_idx]])
-        connected_ids = list(map(lambda n: n.label_str.split("#")[1], connected_nodes))
-
-        return (self.hierarchy_mapping_df[
-            self.hierarchy_mapping_df[child_level].apply(lambda c: c in connected_ids)][parent_level]
-                .apply(lambda p: parent_id == p)
-                .any()
-        )
+        return (parent, child) in self.mapping_table
 
     def get_description_vocab(self, ids: Set[int]) -> Dict[int, str]:
         return {idx: node.label_name for idx, node in self.nodes.items() if idx in ids}
 
+    def _build_mapping_table(
+        self, hierarchy_df: pd.DataFrame,
+        hierarchy_mapping_df: pd.DataFrame,
+        input_level: str, output_level: str
+    ):
+        lookup = hierarchy_mapping_df.set_index(input_level).to_dict()
+        lookup = lookup[output_level]
+
+        # Ensure root node remains unchanged
+        lookup["-1"] = "-1"
+
+        make_format = lambda l, x: "{level}#{value}".format(level=l,value=x)
+        lookup = {make_format(input_level, k): make_format(output_level, v) for k, v in lookup.items()}
+
+        map_df = hierarchy_df
+        map_df[self.parent_id_col] = (
+            map_df[self.parent_id_col].replace(to_replace=lookup)
+        )
+
+        return set(map_df
+                .reindex(columns=[self.parent_id_col, self.child_id_col])
+                .drop_duplicates()
+                .to_records(index=False)
+                .tolist()
+        )
+
     def build_hierarchy_from_df(
         self, hierarchy_df: pd.DataFrame, vocab: Dict[str, int],
-        hierarchy_mapping_df: Optional[pd.DataFrame] = None
+        hierarchy_mapping_df: Optional[pd.DataFrame] = None,
+        input_level: str = "",
+        output_level: str = ""
     ):
         self.vocab: Dict[str, int] = vocab
-        self.hierarchy_mapping_df = hierarchy_mapping_df
+
+        if hierarchy_mapping_df is not None:
+            self.mapping_table = self._build_mapping_table(
+                hierarchy_df, hierarchy_mapping_df,
+                input_level, output_level
+            )
+        else:
+            self.mapping_table = None
+
         self._build_extended_vocab(hierarchy_df, vocab)
         for _, row in tqdm(hierarchy_df.iterrows(), desc="Building Hierarchy from df"):
             child_id = row[self.child_id_col]
