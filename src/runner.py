@@ -474,10 +474,17 @@ class ExperimentRunner:
                 config=mimic_config
             )
             hierarchy_df = hierarchy_preprocessor.load_data()
+
+            hierarchy_mapping_preprocessor = preprocessing.ICD9DataPreprocessor(
+                icd9_file=mimic_config.icd9_file,
+                icd9_hierarchy_file=mimic_config.icd9_hierarchy_file
+            )
+            hierarchy_mapping_df = hierarchy_mapping_preprocessor.load_data_as_hierarchy()
+
             hierarchy = knowledge.HierarchyKnowledge(
                 config=knowledge.KnowledgeConfig(),
             )
-            hierarchy.build_hierarchy_from_df(hierarchy_df, metadata.x_vocab)
+            hierarchy.build_hierarchy_from_df(hierarchy_df, metadata.x_vocab, hierarchy_mapping_df)
             return hierarchy
         elif self.config.sequence_type == "huawei_logs":
             hierarchy_preprocessor = preprocessing.ConcurrentAggregatedLogsHierarchyPreprocessor(

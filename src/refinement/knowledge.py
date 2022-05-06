@@ -8,6 +8,7 @@ import numpy as np
 import ast
 from tqdm import tqdm
 from src.runner import RunState
+from src.features.knowledge import BaseKnowledge
 from concurrent import futures
 from functools import partial
 
@@ -81,7 +82,8 @@ class KnowledgeProcessor:
         edge: Tuple[str, str],
         attention_comp: Dict[str, Dict[str, float]],
         train_frequency: Dict[str, Dict[str, float]],
-        comparison_df: pd.DataFrame):
+        comparison_df: pd.DataFrame,
+        knowledge: BaseKnowledge):
         (c, p) = edge
 
         if c == p:
@@ -90,6 +92,11 @@ class KnowledgeProcessor:
         relevant_df = comparison_df[
             comparison_df["inputs"].apply(lambda x: c + "," in x)
         ]
+
+        relevant_df = relevant_df[
+            relevant_df["output"].apply(lambda x: knowledge.is_connected(c, x))
+        ]
+        
         if len(relevant_df) == 0:
             return None
 
@@ -115,6 +122,7 @@ class KnowledgeProcessor:
         attention_comp: Dict[str, Dict[str, float]],
         train_frequency: Dict[str, Dict[str, float]],
         comparison_df: pd.DataFrame,
+        knowledge: BaseKnowledge
     ) -> pd.DataFrame:
         added_edges = self._calculate_added_edges(
             attention_base=attention_base, attention_comp=attention_comp
@@ -127,7 +135,8 @@ class KnowledgeProcessor:
                     self._calculate_edge_comparison_for_edge,
                     attention_comp=attention_comp,
                     train_frequency=train_frequency,
-                    comparison_df=comparison_df
+                    comparison_df=comparison_df,
+                    knowledge=knowledge
                 ), added_edges, chunksize=256
             ):
                 if record is not None:
@@ -204,7 +213,8 @@ class KnowledgeProcessor:
             attention_base=attention_base,
             attention_comp=attention_comp,
             train_frequency=train_frequency,
-            comparison_df=comparison_df
+            comparison_df=comparison_df,
+            knowledge=run.knowledge
         )
 
         edge_comparison_df = (

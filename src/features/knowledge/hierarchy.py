@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import Dict, Set
+from typing import Dict, Optional, Set
 from tqdm import tqdm
 import logging
 from .node import Node
@@ -25,13 +25,34 @@ class HierarchyKnowledge(BaseKnowledge):
     def get_connections_for_idx(self, idx: int) -> Set[int]:
         return set(self.nodes[idx].get_ancestor_label_idxs() + [idx])
 
+    def is_connected(self, child: str, parent: str) -> bool:
+        if self.hierarchy_mapping_df is None:
+            return super().is_connected(child, parent)
+
+        # Resolve connections across different levels for mimic
+        child_idx = self.vocab[child]
+
+        (child_level, _) = child.split("#")
+        (parent_level, parent_id) = parent.split("#")
+
+        connected_nodes = set(self.nodes[child_idx].get_ancestors() + [self.nodes[child_idx]])
+        connected_ids = list(map(lambda n: n.label_str.split("#")[1], connected_nodes))
+
+        return (self.hierarchy_mapping_df[
+            self.hierarchy_mapping_df[child_level].apply(lambda c: c in connected_ids)][parent_level]
+                .apply(lambda p: parent_id == p)
+                .any()
+        )
+
     def get_description_vocab(self, ids: Set[int]) -> Dict[int, str]:
         return {idx: node.label_name for idx, node in self.nodes.items() if idx in ids}
 
     def build_hierarchy_from_df(
-        self, hierarchy_df: pd.DataFrame, vocab: Dict[str, int]
+        self, hierarchy_df: pd.DataFrame, vocab: Dict[str, int],
+        hierarchy_mapping_df: Optional[pd.DataFrame] = None
     ):
         self.vocab: Dict[str, int] = vocab
+        self.hierarchy_mapping_df = hierarchy_mapping_df
         self._build_extended_vocab(hierarchy_df, vocab)
         for _, row in tqdm(hierarchy_df.iterrows(), desc="Building Hierarchy from df"):
             child_id = row[self.child_id_col]

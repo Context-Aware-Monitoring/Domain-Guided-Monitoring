@@ -17,5 +17,11 @@ class BaseKnowledge:
     def get_connections_for_idx(self, idx: int) -> Set[int]:
         return set([idx])
 
+    def is_connected(self, child: str, parent: str) -> bool:
+        child_idx = self.vocab[child]
+        parent_idx = self.extended_vocab[parent]
+
+        return parent_idx in self.get_connections_for_idx(child_idx)
+
     def get_description_vocab(self, ids: Set[int]) -> Dict[int, str]:
         return {}
