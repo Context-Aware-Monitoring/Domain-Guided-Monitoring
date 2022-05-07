@@ -93,9 +93,10 @@ class KnowledgeProcessor:
             comparison_df["inputs"].apply(lambda x: c + "," in x)
         ]
 
-        relevant_df = relevant_df[
-            relevant_df["output"].apply(lambda x: knowledge.is_connected(c, x))
-        ]
+        if self.config.restrict_outputs_to_ancestors:
+            relevant_df = relevant_df[
+                relevant_df["output"].apply(lambda x: knowledge.is_connected(c, x))
+            ]
         
         if len(relevant_df) == 0:
             return None
@@ -145,9 +146,13 @@ class KnowledgeProcessor:
         metric_df = pd.DataFrame.from_records(
             records, columns=["child", "parent", "child_metric"]
         )
-        parent_metric_df = metric_df.groupby("parent")["child_metric"].mean().reset_index(name="parent_metric")
-        metric_df = metric_df.merge(parent_metric_df, on="parent")
-        metric_df["refinement_metric"]= metric_df.apply(lambda x: np.mean([x["child_metric"], x["parent_metric"]]), axis=1)
+
+        if self.config.aggregate_metric_for_parents:
+            parent_metric_df = metric_df.groupby("parent")["child_metric"].mean().reset_index(name="parent_metric")
+            metric_df = metric_df.merge(parent_metric_df, on="parent")
+            metric_df["refinement_metric"] = metric_df.apply(lambda x: np.mean([x["child_metric"], x["parent_metric"]]), axis=1)
+        else:
+            metric_df["refinement_metric"] = metric_df["child_metric"]
         return metric_df
 
 

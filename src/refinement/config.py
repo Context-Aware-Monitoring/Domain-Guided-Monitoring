@@ -31,3 +31,7 @@ class RefinementConfig:
     freeze_activation_sequence: List[int] = dataclasses.field(
         default_factory=lambda: [1]
     )
+    # When calculating the metric of a node, only consider the outputs that are ancestors
+    restrict_outputs_to_ancestors: bool = False
+    # Aggregate the metric values of inputs to approximate the metric for hidden nodes
+    aggregate_metric_for_parents: bool = False
