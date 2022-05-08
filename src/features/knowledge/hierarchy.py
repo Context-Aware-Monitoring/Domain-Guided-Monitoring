@@ -48,7 +48,7 @@ class HierarchyKnowledge(BaseKnowledge):
         make_format = lambda l, x: "{level}#{value}".format(level=l,value=x)
         lookup = {make_format(input_level, k): make_format(output_level, v) for k, v in lookup.items()}
 
-        map_df = hierarchy_df
+        map_df = hierarchy_df.copy(deep=True)
         map_df[self.parent_id_col] = (
             map_df[self.parent_id_col].replace(to_replace=lookup)
         )
