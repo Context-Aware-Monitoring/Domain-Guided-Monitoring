@@ -129,7 +129,7 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
 
         connection_offset = self.connections[outgoing_idx].index(incoming_idx)
 
-        return self.partition_end[outgoing_idx] + connection_offset
+        return (self.partition_end[outgoing_idx - 1] if outgoing_idx > 0 else 0) + connection_offset
 
     def _load_connection_embedding_matrix(self):
         embeddings = tf.concat(
