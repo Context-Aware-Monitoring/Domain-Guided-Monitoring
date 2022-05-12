@@ -15,6 +15,7 @@ from functools import partial
 class KnowledgeProcessor:
     def __init__(self, config: RefinementConfig):
         self.config = config
+        self.max_rank = 0
 
     def load_original_knowledge(self) -> Dict[str, List[str]]:
         with open(self.config.original_file_knowledge) as knowledge_file:
@@ -36,6 +37,10 @@ class KnowledgeProcessor:
         )
         return edges_comp - edges_base
 
+    def _make_outlier_score(self, rank_before: int, rank_after: int):
+        decay = np.exp(-self.config.rank_decay_rate * min(rank_before, rank_after) / self.max_rank)
+        return (rank_before - rank_after) / np.sqrt(2) * decay
+
     def _calculate_refinement_metric(
         self, input_feature: str, comparison_df: pd.DataFrame
     ) -> float:
@@ -54,7 +59,7 @@ class KnowledgeProcessor:
         if "outlier_score" in self.config.refinement_metric:
             outlier_scores = (
                 relevant_df[["output_rank_base", "output_rank_comp"]]
-                .apply(lambda x: (int(x[0]) - int(x[1])) / np.sqrt(2), axis=1)
+                .apply(lambda x: self._make_outlier_score(int(x[0]), int(x[1])), axis=1)
                 .to_list()
             )
             if "median" in self.config.refinement_metric:
@@ -289,6 +294,7 @@ class KnowledgeProcessor:
 
     def _get_best_rank_of(self, output: str, predictions_str: str) -> int:
         predictions = ast.literal_eval(predictions_str)
+        self.max_rank = max(self.max_rank, len(predictions))
         return len([x for x in predictions if predictions[x] > predictions[output]])
 
     def _convert_prediction_df(self, prediction_df: pd.DataFrame) -> pd.DataFrame:
