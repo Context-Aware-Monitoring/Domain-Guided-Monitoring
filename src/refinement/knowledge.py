@@ -198,6 +198,17 @@ class KnowledgeProcessor:
 
         return refined_knowledge
 
+    def _calculate_refinement_score(
+        self,
+        refinement_metric: float,
+        attention: Dict[str, Dict[str, float]],
+        child: str, parent: str
+    ):
+        adjustment = np.exp(self.config.corrective_factor * refinement_metric)
+        weight = self.config.correction_attention_scale * float(attention[child][parent])
+
+        return adjustment * (1.0 - weight) / (1.0 - adjustment * weight)
+
     def update_corrective_terms(
         self,
         index: int,
@@ -230,9 +241,14 @@ class KnowledgeProcessor:
             .sort_values(by="refinement_metric", ascending=True)
             .head(n=self.config.max_edges_to_remove)
         )
-
-        edge_comparison_df["refinement_score"] = edge_comparison_df["refinement_metric"].apply(
-            lambda x: np.exp(self.config.corrective_factor * x)
+        
+        edge_comparison_df["refinement_score"] = edge_comparison_df.apply(
+            lambda x: self._calculate_refinement_score(
+                x["refinement_metric"],
+                attention_comp,
+                x["child"], x["parent"]
+            ),
+            axis=1
         )
 
         edges_to_correct: Dict[Tuple[str, str], float] = {}

@@ -35,3 +35,4 @@ class RefinementConfig:
     restrict_outputs_to_ancestors: bool = False
     # Aggregate the metric values of inputs to approximate the metric for hidden nodes
     aggregate_metric_for_parents: bool = False
+    correction_attention_scale: float = 1.0
