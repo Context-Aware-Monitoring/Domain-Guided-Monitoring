@@ -180,7 +180,7 @@ def main_boosting():
             .format(current=i+1, total=refinement_config.num_refinements)
         )
 
-    logging.info("Finished boosting run")
+    logging.info("Finished boosting run ({group})".format(group=refinement_timestamp))
     logging.info("reference run id: {reference_run_id}".format(reference_run_id=reference_run_id))
     logging.info("original run id: {original_run_id}".format(original_run_id=original_run_id))
 
