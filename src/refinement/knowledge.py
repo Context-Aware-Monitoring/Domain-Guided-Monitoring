@@ -318,7 +318,7 @@ class KnowledgeProcessor:
         edges_to_restore: Dict[Tuple[str, str], float] = {}
 
         for _, row in edge_comparison_df.iterrows():
-            edges_to_restore[(row["child"], row["parent"])] = 1.0 / row["refinement_score"].item()
+            edges_to_restore[(row["child"], row["parent"])] = 1.0 / row["refinement_score"]
 
         run.model.embedding_layer.update_corrective_terms(edges_to_restore)
 
