@@ -11,6 +11,7 @@ from src.runner import RunState
 from src.features.knowledge import BaseKnowledge
 from concurrent import futures
 from functools import partial
+import pickle
 
 class KnowledgeProcessor:
     def __init__(self, config: RefinementConfig):
@@ -276,10 +277,12 @@ class KnowledgeProcessor:
 
         logging.info("Updating corrective terms for %d edges", len(edges_to_correct))
 
-        file_path = Path(
-            self.config.mlflow_dir + "{run_id}/artifacts/edge_comparison.pkl".format(run_id=current_run_id)
-        )
-        edge_comparison_df.to_pickle(file_path)
+        file_path = self.config.mlflow_dir + "{run_id}/artifacts/".format(run_id=current_run_id)
+        
+        edge_comparison_df.to_pickle(file_path + "edge_comparison.pkl")
+        corrective_terms = run.model.embedding_layer.get_corrective_terms_as_list()
+        with open(file_path + "previous_corrective_terms.pkl", "wb") as f:
+            pickle.dump(corrective_terms, f)
 
         run.model.embedding_layer.update_corrective_terms(edges_to_correct)
 
@@ -294,11 +297,13 @@ class KnowledgeProcessor:
         reference_run_id: str
     ):
         logging.info("Restoring best corrective terms")
-        file_path = Path(
-            self.config.mlflow_dir + "{run_id}/artifacts/edge_comparison.pkl".format(run_id=refinement_run_id)
-        )
+        file_path = self.config.mlflow_dir + "{run_id}/artifacts/".format(run_id=refinement_run_id)
 
-        edge_comparison_before_df = pd.read_pickle(file_path) 
+        with open(file_path + "previous_corrective_terms.pkl", "rb") as f:
+            corrective_terms = pickle.load(f)
+        run.model.embedding_layer.set_corrective_terms_from_list(corrective_terms)
+
+        edge_comparison_before_df = pd.read_pickle(file_path + "edge_comparison.pkl") 
         edge_comparison_after_df = self._calculate_edge_comparison_for_runs(
             reference_run_id=reference_run_id,
             refinement_run_id=refinement_run_id,
@@ -309,18 +314,34 @@ class KnowledgeProcessor:
             edge_comparison_after_df,
             on=["child", "parent"], suffixes=["_before", "_after"]
         )
+        edge_comparison_df = (
+            edge_comparison_df[
+                edge_comparison_df["refinement_metric_before"] # Only allow edges that decrease performance
+                < self.config.max_refinement_metric
+            ]
+            .sort_values(by="refinement_metric_before", ascending=True)
+            .head(n=self.config.max_edges_to_remove)
+        )
+
+        previously_corrected_count = len(edge_comparison_df)
+
+        # Re-apply all corrections which were helpful on top of previous corrections
         edge_comparison_df = edge_comparison_df[edge_comparison_df.apply(
             lambda x: (
                 x["refinement_metric_before"] - x["refinement_metric_after"]
-            ) > self.config.restore_threshold, axis=1
+            ) <= self.config.restore_threshold, axis=1
         )]
 
-        edges_to_restore: Dict[Tuple[str, str], float] = {}
+        logging.info("Reapplying corrections for %d edges (restoring %d edges)",
+         len(edge_comparison_df), previously_corrected_count - len(edge_comparison_df)
+        )
+
+        edges_to_reapply: Dict[Tuple[str, str], float] = {}
 
         for _, row in edge_comparison_df.iterrows():
-            edges_to_restore[(row["child"], row["parent"])] = 1.0 / row["refinement_score"]
+            edges_to_reapply[(row["child"], row["parent"])] = row["refinement_score"]
 
-        run.model.embedding_layer.update_corrective_terms(edges_to_restore)
+        run.model.embedding_layer.update_corrective_terms(edges_to_reapply)
 
     def _is_trainable(self, sequence: List[int], index: int) -> bool:
         # Sequence stores True (=1) if frozen, therefore negate

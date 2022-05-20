@@ -112,6 +112,12 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
             shape=(self.num_connections),
         )
 
+    def get_corrective_terms_as_list(self):
+        return self.corrective_terms.numpy().tolist()
+
+    def set_corrective_terms_from_list(self, term_list: List[float]):
+        self.corrective_terms.assign(tf.convert_to_tensor(term_list, dtype=tf.float32))
+
     def update_corrective_terms(self, connections: Dict[Tuple[str, str], float]):
         # Ensure that connections that should not be corrected don't have any effect
         term_list = [1.0] * self.num_connections
