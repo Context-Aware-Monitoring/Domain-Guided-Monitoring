@@ -18,7 +18,9 @@ class RefinementConfig:
     edges_to_add: float = -1
     reference_file_knowledge: Path = Path("data/reference_file_knowledge.json")
     mlflow_dir: str = "mlruns/1/"
-    corrective_factor: float = 0.2
+    corrective_factor: List[float] = dataclasses.field(
+        default_factory=lambda: [0.2]
+    )
     original_run_id: str = ""
     reference_run_id: str = ""
     keep_state_from_original: bool = False

@@ -206,11 +206,12 @@ class KnowledgeProcessor:
 
     def _calculate_refinement_score(
         self,
+        corrective_factor: float,
         refinement_metric: float,
         attention: Dict[str, Dict[str, float]],
         child: str, parent: str
     ):
-        adjustment = np.exp(self.config.corrective_factor * refinement_metric)
+        adjustment = np.exp(corrective_factor * refinement_metric)
         weight = self.config.correction_attention_scale * float(attention[child][parent])
 
         return adjustment * (1.0 - weight) / (1.0 - adjustment * weight)
@@ -263,6 +264,7 @@ class KnowledgeProcessor:
         attention_comp = self._load_attention_weights(refinement_run_id)
         edge_comparison_df["refinement_score"] = edge_comparison_df.apply(
             lambda x: self._calculate_refinement_score(
+                self._get_current_corrective_factor(self.config.corrective_factor, index),
                 x["refinement_metric"],
                 attention_comp,
                 x["child"], x["parent"]
@@ -346,6 +348,9 @@ class KnowledgeProcessor:
     def _is_trainable(self, sequence: List[int], index: int) -> bool:
         # Sequence stores True (=1) if frozen, therefore negate
         return False if sequence[min(index, len(sequence) - 1)] == 1 else True
+
+    def _get_current_corrective_factor(self, sequence: List[float], index: int) -> float:
+        return sequence[min(index, len(sequence) - 1)]
 
     def _load_attention_weights(self, run_id):
         attention_path = Path(
