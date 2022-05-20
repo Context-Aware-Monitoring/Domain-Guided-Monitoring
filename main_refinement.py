@@ -172,8 +172,18 @@ def main_boosting():
             processor.update_corrective_terms(i, current_run_id, state, refinement_run_ids[-1], reference_run_id)
             _log_all_configs_to_mlflow()
             state = runner.run_from_state(current_run_id, state)
-            _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, i, refinement_config)
+            index = 2 * i if refinement_config.restore_best_correction else i
+            _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, index, refinement_config)
             refinement_run_ids.append(current_run_id)
+
+        if refinement_config.restore_best_correction:
+            with mlflow.start_run() as run:
+                current_run_id = run.info.run_id
+                processor.restore_best_corrective_terms(state, refinement_run_ids[-1], reference_run_id)
+                _log_all_configs_to_mlflow()
+                state = runner.run_from_state(current_run_id, state)
+                _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 2 * i + 1, refinement_config)
+                refinement_run_ids.append(current_run_id)
 
         logging.info(
             "Completed boosting iteration {current} of {total}"

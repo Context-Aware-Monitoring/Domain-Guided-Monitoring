@@ -214,6 +214,27 @@ class KnowledgeProcessor:
 
         return adjustment * (1.0 - weight) / (1.0 - adjustment * weight)
 
+    def _calculate_edge_comparison_for_runs(
+        self,
+        reference_run_id,
+        refinement_run_id,
+        knowledge: BaseKnowledge
+    ):
+        attention_base = self._load_attention_weights(reference_run_id)
+        attention_comp = self._load_attention_weights(refinement_run_id)
+        train_frequency = self._load_input_frequency_dict(refinement_run_id)
+        comparison_df = self._load_comparison_df(
+            run_id_base=reference_run_id, run_id_comp=refinement_run_id
+        )
+
+        return self._calculate_edge_comparison(
+            attention_base=attention_base,
+            attention_comp=attention_comp,
+            train_frequency=train_frequency,
+            comparison_df=comparison_df,
+            knowledge=knowledge
+        )
+
     def update_corrective_terms(
         self,
         index: int,
@@ -223,18 +244,9 @@ class KnowledgeProcessor:
         reference_run_id: str
     ):
         logging.info("Starting update of corrective terms")
-        attention_base = self._load_attention_weights(reference_run_id)
-        attention_comp = self._load_attention_weights(refinement_run_id)
-        train_frequency = self._load_input_frequency_dict(refinement_run_id)
-        comparison_df = self._load_comparison_df(
-            run_id_base=reference_run_id, run_id_comp=refinement_run_id
-        )
-
-        edge_comparison_df = self._calculate_edge_comparison(
-            attention_base=attention_base,
-            attention_comp=attention_comp,
-            train_frequency=train_frequency,
-            comparison_df=comparison_df,
+        edge_comparison_df = self._calculate_edge_comparison_for_runs(
+            reference_run_id=reference_run_id,
+            refinement_run_id=refinement_run_id,
             knowledge=run.knowledge
         )
 
@@ -247,6 +259,7 @@ class KnowledgeProcessor:
             .head(n=self.config.max_edges_to_remove)
         )
         
+        attention_comp = self._load_attention_weights(refinement_run_id)
         edge_comparison_df["refinement_score"] = edge_comparison_df.apply(
             lambda x: self._calculate_refinement_score(
                 x["refinement_metric"],
@@ -273,6 +286,41 @@ class KnowledgeProcessor:
         run.model.rnn_layer.trainable = self._is_trainable(self.config.freeze_rnn_sequence, index)
         run.model.embedding_layer.trainable = self._is_trainable(self.config.freeze_embeddings_sequence, index)
         run.model.activation_layer.trainable = self._is_trainable(self.config.freeze_activation_sequence, index)
+
+    def restore_best_corrective_terms(
+        self,
+        run: RunState,
+        refinement_run_id: str,
+        reference_run_id: str
+    ):
+        logging.info("Restoring best corrective terms")
+        file_path = Path(
+            self.config.mlflow_dir + "{run_id}/artifacts/edge_comparison.pkl".format(run_id=refinement_run_id)
+        )
+
+        edge_comparison_before_df = pd.read_pickle(file_path) 
+        edge_comparison_after_df = self._calculate_edge_comparison_for_runs(
+            reference_run_id=reference_run_id,
+            refinement_run_id=refinement_run_id,
+            knowledge=run.knowledge
+        )
+
+        edge_comparison_df = edge_comparison_before_df.merge(
+            edge_comparison_after_df,
+            on=["child", "parent"], suffixes=["_before", "_after"]
+        )
+        edge_comparison_df = edge_comparison_df[edge_comparison_df.apply(
+            lambda x: (
+                x["refinement_metric_before"] - x["refinement_metric_after"]
+            ) > self.config.restore_threshold, axis=1
+        )]
+
+        edges_to_restore: Dict[Tuple[str, str], float] = {}
+
+        for _, row in edge_comparison_df.iterrows():
+            edges_to_restore[(row["child"], row["parent"])] = 1.0 / row["refinement_score"].item()
+
+        run.model.embedding_layer.update_corrective_terms(edges_to_restore)
 
     def _is_trainable(self, sequence: List[int], index: int) -> bool:
         # Sequence stores True (=1) if frozen, therefore negate

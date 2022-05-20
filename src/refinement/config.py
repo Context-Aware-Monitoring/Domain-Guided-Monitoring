@@ -13,7 +13,7 @@ class RefinementConfig:
     refinement_metric: str = "mean_outlier_score"
     refinement_metric_maxrank: int = -1
     max_edges_to_remove: int = 10
-    max_refinement_metric: int = -1
+    max_refinement_metric: float = -1
     original_file_knowledge: Path = Path("data/original_file_knowledge.json")
     edges_to_add: float = -1
     reference_file_knowledge: Path = Path("data/reference_file_knowledge.json")
@@ -37,3 +37,5 @@ class RefinementConfig:
     aggregate_metric_for_parents: bool = False
     correction_attention_scale: float = 1.0
     rank_decay_rate: float = 2.0
+    restore_best_correction: bool = True
+    restore_threshold: float = 0.0
