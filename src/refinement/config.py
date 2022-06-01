@@ -36,7 +36,7 @@ class RefinementConfig:
     # When calculating the metric of a node, only consider the outputs that are ancestors
     restrict_outputs_to_ancestors: bool = False
     # Aggregate the metric values of inputs to approximate the metric for hidden nodes
-    aggregate_metric_for_parents: bool = False
+    aggregated_parents_contribution: float = 0.0
     correction_attention_scale: float = 1.0
     rank_decay_rate: float = 2.0
     restore_best_correction: bool = True
