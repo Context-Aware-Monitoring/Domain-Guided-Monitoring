@@ -129,6 +129,8 @@ def _do_reference_run(timestamp: int, config: refinement.RefinementConfig) -> st
 
 
 def _do_original_run(timestamp: int, config: refinement.RefinementConfig) -> Tuple[str, RunState]:
+    _write_original_knowledge(config)
+
     if len(config.original_run_id) > 0:
         original_run_id = config.original_run_id
         state = ExperimentRunner().prepare_run()
@@ -152,11 +154,10 @@ def _do_original_run(timestamp: int, config: refinement.RefinementConfig) -> Tup
         return (original_run_id, state)
 
 
-def main_boosting():
+def main_boosting(refinement_config: refinement.RefinementConfig):
     mlflow.set_experiment("Domain Guided Monitoring")
 
     refinement_timestamp = time.time()
-    refinement_config = refinement.RefinementConfig()
 
     reference_run_id = _do_reference_run(refinement_timestamp, refinement_config)
     (original_run_id, state) = _do_original_run(refinement_timestamp, refinement_config)
@@ -198,9 +199,8 @@ def main_boosting():
         logging.info("refinement run id: {refinement_run_id}".format(refinement_run_id=run))
 
 
-def main_refinement():
+def main_refinement(refinement_config: refinement.RefinementConfig):
     refinement_timestamp = time.time()
-    refinement_config = refinement.RefinementConfig()
     num_reference_connections = _write_reference_knowledge(refinement_config)
     reference_run_id = _main()
     _add_mlflow_tag(reference_run_id, refinement_timestamp, suffix="reference")
@@ -233,5 +233,11 @@ def main_refinement():
         num_refinement_connections = num_new_refinement_connections    
 
 if __name__ == "__main__":
-    #main_refinement()
-    main_boosting()
+    refinement_config = refinement.RefinementConfig()
+
+    if refinement_config.mode == "v1":
+        main_refinement(refinement_config)
+    elif refinement_config.mode == "v2":
+        main_boosting(refinement_config)
+    else:
+        logging.error("unknown correction mode")

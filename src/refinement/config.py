@@ -41,3 +41,5 @@ class RefinementConfig:
     rank_decay_rate: float = 2.0
     restore_best_correction: bool = True
     restore_threshold: float = 0.0
+
+    mode: str = "v2" # v1 for old correction, v2 for new
