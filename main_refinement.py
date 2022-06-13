@@ -9,6 +9,7 @@ import random
 from src.main import _log_all_configs_to_mlflow
 from src import ExperimentRunner, RunState
 import mlflow
+import pickle
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("matplotlib.font_manager").disabled = True
@@ -239,5 +240,24 @@ if __name__ == "__main__":
         main_refinement(refinement_config)
     elif refinement_config.mode == "v2":
         main_boosting(refinement_config)
+    elif refinement_config.mode == "inject":
+        mlflow.set_experiment("Domain Guided Monitoring")
+        with mlflow.start_run() as run:
+            current_run_id = run.info.run_id
+            runner = ExperimentRunner()
+            state = runner.prepare_run()
+            _log_all_configs_to_mlflow()
+
+            with open("data/injected_comparison.pkl", "rb") as f:
+                comparison = pickle.load(f)
+
+            edges_to_correct: Dict[Tuple[str, str], float] = {}
+
+            for _, row in comparison.iterrows():
+                edges_to_correct[(row["child"], row["parent"])] = row["refinement_score"]
+
+            state.model.embedding_layer.update_corrective_terms(edges_to_correct)
+
+            state = runner.run_from_state(current_run_id, state)
     else:
         logging.error("unknown correction mode")
