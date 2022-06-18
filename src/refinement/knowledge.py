@@ -99,7 +99,7 @@ class KnowledgeProcessor:
             comparison_df["inputs"].apply(lambda x: c + "," in x)
         ]
 
-        if self.config.restrict_outputs_to_ancestors:
+        if self.config.restrict_outputs_to_ancestors and knowledge is not None:
             relevant_df = relevant_df[
                 relevant_df["output"].apply(lambda x: knowledge.is_connected(c, x))
             ]
@@ -133,7 +133,7 @@ class KnowledgeProcessor:
         attention_comp: Dict[str, Dict[str, float]],
         train_frequency: Dict[str, Dict[str, float]],
         comparison_df: pd.DataFrame,
-        knowledge: BaseKnowledge
+        knowledge: BaseKnowledge = None
     ) -> pd.DataFrame:
         added_edges = self._calculate_added_edges(
             attention_base=attention_base, attention_comp=attention_comp

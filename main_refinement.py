@@ -231,7 +231,9 @@ def main_refinement(refinement_config: refinement.RefinementConfig):
         _add_mlflow_tag(
             refinement_run_id, refinement_timestamp, suffix="refinement_" + str(i)
         )
-        num_refinement_connections = num_new_refinement_connections    
+        num_refinement_connections = num_new_refinement_connections
+
+    logging.info("Finished refinement run ({group})".format(group=refinement_timestamp))
 
 if __name__ == "__main__":
     refinement_config = refinement.RefinementConfig()
