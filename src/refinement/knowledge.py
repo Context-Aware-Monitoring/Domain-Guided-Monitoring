@@ -9,6 +9,8 @@ import ast
 from tqdm import tqdm
 from src.runner import RunState
 from src.features.knowledge import BaseKnowledge
+from concurrent import futures
+from functools import partial
 import pickle
 
 class KnowledgeProcessor:
@@ -162,13 +164,19 @@ class KnowledgeProcessor:
         )
 
         records = []
-        for edge in tqdm(added_edges, desc="Calculating metrics"):
-            record = self._calculate_edge_comparison_for_edge(
-                edge, attention_comp, train_frequency, comparison_df, io_compatibility, knowledge
-            )
-
-            if record is not None:
-                records.append(record)
+        with futures.ProcessPoolExecutor() as pool:
+            for record in pool.map(
+                partial(
+                    self._calculate_edge_comparison_for_edge,
+                    attention_comp=attention_comp,
+                    train_frequency=train_frequency,
+                    comparison_df=comparison_df,
+                    io_compatibility=io_compatibility,
+                    knowledge=knowledge
+                ), added_edges, chunksize=256
+            ):
+                if record is not None:
+                    records.append(record)
 
         metric_df = pd.DataFrame.from_records(
             records, columns=["child", "parent", "child_metric"]
