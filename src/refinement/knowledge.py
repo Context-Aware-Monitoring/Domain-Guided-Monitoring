@@ -9,8 +9,6 @@ import ast
 from tqdm import tqdm
 from src.runner import RunState
 from src.features.knowledge import BaseKnowledge
-from concurrent import futures
-from functools import partial
 import pickle
 
 class KnowledgeProcessor:
@@ -43,7 +41,10 @@ class KnowledgeProcessor:
         return (rank_before - rank_after) / np.sqrt(2) * decay
 
     def _calculate_refinement_metric(
-        self, input_feature: str, comparison_df: pd.DataFrame
+        self,
+        input_feature: str,
+        comparison_df: pd.DataFrame,
+        io_compatibility: Dict[Tuple[str, str], Tuple[float, float]],
     ) -> float:
         # refinement_metric > 0 -> comparison is better than base
         relevant_df = comparison_df.copy()
@@ -58,15 +59,34 @@ class KnowledgeProcessor:
             )
 
         if "outlier_score" in self.config.refinement_metric:
-            outlier_scores = (
-                relevant_df[["output_rank_base", "output_rank_comp"]]
-                .apply(lambda x: self._make_outlier_score(int(x[0]), int(x[1])), axis=1)
-                .to_list()
-            )
+            per_sequence_performance = []
+
+            for _, x in relevant_df.iterrows():
+                compatibility_deviations = []
+                
+                for sibling_input in x["input_converted"]:
+                    (avg_rank, frequency) = io_compatibility[(sibling_input, x["output_converted"])]
+                    compatibility_deviations.append(frequency * (avg_rank - x["rank_difference"]))
+
+                average_deviation = np.mean(compatibility_deviations)
+                (avg_rank, frequency) = io_compatibility[(input_feature, x["output_converted"])]
+                actual_deviation = frequency * (avg_rank - x["rank_difference"])
+
+                std_deviation = np.std(compatibility_deviations)
+                normalised_deviation = actual_deviation - average_deviation
+                if std_deviation != 0.0:
+                    normalised_deviation /= std_deviation
+                weight = np.exp(
+                    self.config.compatibility_factor * normalised_deviation
+                )
+                rank_difference = self._make_outlier_score(x["output_rank_base"], x["output_rank_comp"])
+                weighted_performance = rank_difference * weight
+                per_sequence_performance.append(weighted_performance)
+
             if "median" in self.config.refinement_metric:
-                return np.median(outlier_scores)
+                return np.median(per_sequence_performance)
             elif "mean" in self.config.refinement_metric:
-                return np.mean(outlier_scores)
+                return np.mean(per_sequence_performance)
         elif "accuracy" in self.config.refinement_metric:
             accuracy_ats = [
                 int(s) for s in self.config.refinement_metric.split("_") if s.isdigit()
@@ -89,6 +109,7 @@ class KnowledgeProcessor:
         attention_comp: Dict[str, Dict[str, float]],
         train_frequency: Dict[str, Dict[str, float]],
         comparison_df: pd.DataFrame,
+        io_compatibility: Dict[Tuple[str, str], Tuple[float, float]],
         knowledge: BaseKnowledge):
         (c, p) = edge
 
@@ -96,12 +117,12 @@ class KnowledgeProcessor:
             return None
 
         relevant_df = comparison_df[
-            comparison_df["inputs"].apply(lambda x: c + "," in x)
+            comparison_df["input_converted"].apply(lambda x: c in x)
         ]
 
         if self.config.restrict_outputs_to_ancestors and knowledge is not None:
             relevant_df = relevant_df[
-                relevant_df["output"].apply(lambda x: knowledge.is_connected(c, x))
+                relevant_df["output_converted"].apply(lambda x: knowledge.is_connected(c, x))
             ]
         
         if len(relevant_df) == 0:
@@ -119,7 +140,7 @@ class KnowledgeProcessor:
             "child": c,
             "parent": p,
             "child_metric": self._calculate_refinement_metric(
-                c, relevant_df
+                c, relevant_df, io_compatibility
             )
         }
 
@@ -133,6 +154,7 @@ class KnowledgeProcessor:
         attention_comp: Dict[str, Dict[str, float]],
         train_frequency: Dict[str, Dict[str, float]],
         comparison_df: pd.DataFrame,
+        io_compatibility: Dict[Tuple[str, str], Tuple[float, float]],
         knowledge: BaseKnowledge = None
     ) -> pd.DataFrame:
         added_edges = self._calculate_added_edges(
@@ -140,18 +162,13 @@ class KnowledgeProcessor:
         )
 
         records = []
-        with futures.ProcessPoolExecutor() as pool:
-            for record in pool.map(
-                partial(
-                    self._calculate_edge_comparison_for_edge,
-                    attention_comp=attention_comp,
-                    train_frequency=train_frequency,
-                    comparison_df=comparison_df,
-                    knowledge=knowledge
-                ), added_edges, chunksize=256
-            ):
-                if record is not None:
-                    records.append(record)
+        for edge in tqdm(added_edges, desc="Calculating metrics"):
+            record = self._calculate_edge_comparison_for_edge(
+                edge, attention_comp, train_frequency, comparison_df, io_compatibility, knowledge
+            )
+
+            if record is not None:
+                records.append(record)
 
         metric_df = pd.DataFrame.from_records(
             records, columns=["child", "parent", "child_metric"]
@@ -173,7 +190,7 @@ class KnowledgeProcessor:
         attention_base = self._load_attention_weights(reference_run_id)
         attention_comp = self._load_attention_weights(refinement_run_id)
         train_frequency = self._load_input_frequency_dict(refinement_run_id)
-        comparison_df = self._load_comparison_df(
+        (comparison_df, input_output_compatibility) = self._load_comparison_df(
             run_id_base=reference_run_id, run_id_comp=refinement_run_id
         )
 
@@ -182,6 +199,7 @@ class KnowledgeProcessor:
             attention_comp=attention_comp,
             train_frequency=train_frequency,
             comparison_df=comparison_df,
+            io_compatibility=input_output_compatibility
         )
         edge_comparison_df = (
             edge_comparison_df[
@@ -230,7 +248,7 @@ class KnowledgeProcessor:
         attention_base = self._load_attention_weights(reference_run_id)
         attention_comp = self._load_attention_weights(refinement_run_id)
         train_frequency = self._load_input_frequency_dict(refinement_run_id)
-        comparison_df = self._load_comparison_df(
+        (comparison_df, input_output_compatibility) = self._load_comparison_df(
             run_id_base=reference_run_id, run_id_comp=refinement_run_id
         )
 
@@ -239,6 +257,7 @@ class KnowledgeProcessor:
             attention_comp=attention_comp,
             train_frequency=train_frequency,
             comparison_df=comparison_df,
+            io_compatibility=input_output_compatibility,
             knowledge=knowledge
         )
 
@@ -265,6 +284,10 @@ class KnowledgeProcessor:
             .sort_values(by="refinement_metric", ascending=True)
             .head(n=self.config.max_edges_to_remove)
         )
+
+        if len(edge_comparison_df) == 0:
+            logging.info("Skipping update - Nothing to correct")
+            return
         
         attention_comp = self._load_attention_weights(refinement_run_id)
         edge_comparison_df["refinement_score"] = edge_comparison_df.apply(
@@ -332,6 +355,10 @@ class KnowledgeProcessor:
 
         previously_corrected_count = len(edge_comparison_df)
 
+        if previously_corrected_count == 0:
+            logging.info("Skipping update - Nothing to restore")
+            return
+
         # Re-apply all corrections which were helpful on top of previous corrections
         edge_comparison_df = edge_comparison_df[edge_comparison_df.apply(
             lambda x: (
@@ -371,49 +398,9 @@ class KnowledgeProcessor:
         with open(attention_path) as attention_file:
             return json.load(attention_file)["attention_weights"]
 
-    def _get_best_rank_of(self, output: str, predictions_str: str) -> int:
-        predictions = ast.literal_eval(predictions_str)
+    def _get_best_rank_of(self, output: str, predictions: Dict[str, float]) -> int:
         self.max_rank = max(self.max_rank, len(predictions))
         return len([x for x in predictions if predictions[x] > predictions[output]])
-
-    def _convert_prediction_df(self, prediction_df: pd.DataFrame) -> pd.DataFrame:
-        prediction_df["input_converted"] = prediction_df["input"].apply(
-            lambda x: " -> ".join(
-                [
-                    ", ".join([str(val) for val in sorted(v)])
-                    for (_, v) in sorted(
-                        ast.literal_eval(x).items(), key=lambda y: y[0]
-                    )
-                ]
-            )
-        )
-        prediction_df["inputs"] = prediction_df["input"].apply(
-            lambda x: ",".join(
-                sorted(
-                    set(
-                        [
-                            x
-                            for xs in [
-                                [str(val) for val in sorted(v)]
-                                for (_, v) in sorted(
-                                    ast.literal_eval(x).items(), key=lambda y: y[0]
-                                )
-                            ]
-                            for x in xs
-                        ]
-                    )
-                )
-            )
-            + ","
-        )
-        prediction_df["output"] = prediction_df["output"].apply(
-            lambda x: ast.literal_eval(x)
-        )
-        prediction_df = prediction_df.explode("output")
-        prediction_df["output_rank"] = prediction_df[["output", "predictions"]].apply(
-            lambda x: self._get_best_rank_of(x[0], x[1]), axis=1
-        )
-        return prediction_df
 
     def _load_prediction_df(self, run_id) -> pd.DataFrame:
         run_prediction_output_path = Path(
@@ -428,8 +415,7 @@ class KnowledgeProcessor:
             )
             return pd.DataFrame()
 
-        prediction_output_df = pd.read_csv(run_prediction_output_path)
-        return self._convert_prediction_df(prediction_output_df)
+        return pd.read_csv(run_prediction_output_path)
 
     def _load_input_frequency_dict(self, run_id) -> Dict[str, Dict[str, float]]:
         run_frequency_path = Path(
@@ -459,14 +445,80 @@ class KnowledgeProcessor:
             )
             return pd.DataFrame()
 
-        comparison_df = pd.merge(
-            prediction_df_base.sort_values(by=["input_converted", "inputs", "output"])
-            .reset_index(drop=True)
-            .reset_index(drop=False),
-            prediction_df_comp.sort_values(by=["input_converted", "inputs", "output"])
-            .reset_index(drop=True)
-            .reset_index(drop=False),
-            on=["index", "input_converted", "inputs", "output"],
-            suffixes=(suffix_base, suffix_comp),
+        df = pd.merge(
+            prediction_df_base,
+            prediction_df_comp,
+            on=["input", "output"],
+            suffixes=[suffix_base, suffix_comp]
         )
-        return comparison_df
+
+        predictions_base = "predictions{}".format(suffix_base)
+        predictions_comp = "predictions{}".format(suffix_comp)
+        output_rank_base = "output_rank{}".format(suffix_base)
+        output_rank_comp = "output_rank{}".format(suffix_comp)
+
+        df["input_converted"] = df["input"].apply(lambda x: ast.literal_eval(x)[0]).map(tuple)
+        df["output_converted"] = df["output"].apply(lambda x: ast.literal_eval(x))
+        df[predictions_base] = df[predictions_base].apply(lambda x: ast.literal_eval(x))
+        df[predictions_comp] = df[predictions_comp].apply(lambda x: ast.literal_eval(x))
+
+        per_input_sequence_count_df = (df
+            .copy(deep=True)
+            .drop(columns=["input", "output", predictions_base, predictions_comp])
+        )
+        per_input_sequence_count_df = per_input_sequence_count_df.explode("input_converted")
+        per_input_sequence_count_df = (per_input_sequence_count_df
+            .groupby("input_converted")["output_converted"]
+            .count()
+            .reset_index()
+            .rename(columns={"output_converted": "input_sequence_count"})
+        )
+
+        per_input_output_sequence_count_df = df.copy(deep=True)
+        per_input_output_sequence_count_df = per_input_output_sequence_count_df.explode("input_converted")
+        per_input_output_sequence_count_df = per_input_output_sequence_count_df.explode("output_converted")
+
+        per_input_output_sequence_count_df = (per_input_output_sequence_count_df
+            .groupby(["input_converted", "output_converted"])
+            .count()["input"]
+            .reset_index()
+            .rename(columns={"input": "sequence_count"})
+        )
+        per_input_output_sequence_count_df = (per_input_output_sequence_count_df
+            .merge(per_input_sequence_count_df, on="input_converted")
+        )
+        per_input_output_sequence_count_df["frequency"] = (per_input_output_sequence_count_df
+            .apply(lambda x: x["sequence_count"] / x["input_sequence_count"], axis=1)
+        )
+
+        ranked_df = df.copy(deep=True)
+        ranked_df = ranked_df.explode("output_converted")
+        ranked_df[output_rank_base] = (ranked_df
+            .apply(lambda x: self._get_best_rank_of(x["output_converted"], x[predictions_base]),axis=1)
+        )
+        ranked_df[output_rank_comp] = (ranked_df
+            .apply(lambda x: self._get_best_rank_of(x["output_converted"], x[predictions_comp]), axis=1)
+        )
+        ranked_df["rank_difference"] = (ranked_df
+            .apply(lambda x: x[output_rank_comp] - x[output_rank_base], axis=1)
+        )
+
+        aggregated_ranked_df = ranked_df.copy(deep=True)
+        aggregated_ranked_df = aggregated_ranked_df.explode("input_converted")
+        aggregated_ranked_df = (aggregated_ranked_df
+            .groupby(["input_converted", "output_converted"])["rank_difference"]
+            .mean()
+            .reset_index()
+            .rename(columns={"rank_difference": "avg_rank_difference"})
+        )
+        aggregated_ranked_df = (aggregated_ranked_df
+            .merge(per_input_output_sequence_count_df, on=["input_converted", "output_converted"])
+        )
+
+        input_output_compatibility: Dict[Tuple[str, str], Tuple[float, float]] = {}
+
+        for _, x in aggregated_ranked_df.iterrows():
+            edge = (x["input_converted"], x["output_converted"])
+            input_output_compatibility[edge] = (x["avg_rank_difference"], x["frequency"])
+
+        return (ranked_df, input_output_compatibility)
