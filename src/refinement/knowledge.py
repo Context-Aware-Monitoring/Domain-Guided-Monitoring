@@ -42,6 +42,34 @@ class KnowledgeProcessor:
         decay = np.exp(-self.config.rank_decay_rate * min(rank_before, rank_after) / self.max_rank)
         return (rank_before - rank_after) / np.sqrt(2) * decay
 
+    def _make_aware_outlier_score(
+        self,
+        x,
+        input_feature: str,
+        io_compatibility: Dict[Tuple[str, str], Tuple[float, float]]
+    ):
+        compatibility_deviations = []
+                
+        for sibling_input in x["input_converted"]:
+            (avg_rank, frequency) = io_compatibility[(sibling_input, x["output_converted"])]
+            compatibility_deviations.append(frequency * (x["rank_difference"] - avg_rank))
+
+        average_deviation = np.mean(compatibility_deviations)
+        std_deviation = np.std(compatibility_deviations)
+
+        (avg_rank, frequency) = io_compatibility[(input_feature, x["output_converted"])]
+        actual_deviation = frequency * (x["rank_difference"] - avg_rank)
+
+        normalised_deviation = average_deviation - actual_deviation
+        if std_deviation != 0.0:
+            normalised_deviation /= std_deviation
+        
+        activation = np.exp(self.config.compatibility_factor * normalised_deviation)
+        activation = 1 / activation if x["rank_difference"] >= 0 else activation
+        
+        rank_difference = self._make_outlier_score(x["output_rank_base"], x["output_rank_comp"])
+        return rank_difference * activation
+
     def _calculate_refinement_metric(
         self,
         input_feature: str,
@@ -61,34 +89,15 @@ class KnowledgeProcessor:
             )
 
         if "outlier_score" in self.config.refinement_metric:
-            per_sequence_performance = []
-
-            for _, x in relevant_df.iterrows():
-                compatibility_deviations = []
-                
-                for sibling_input in x["input_converted"]:
-                    (avg_rank, frequency) = io_compatibility[(sibling_input, x["output_converted"])]
-                    compatibility_deviations.append(frequency * (avg_rank - x["rank_difference"]))
-
-                average_deviation = np.mean(compatibility_deviations)
-                (avg_rank, frequency) = io_compatibility[(input_feature, x["output_converted"])]
-                actual_deviation = frequency * (avg_rank - x["rank_difference"])
-
-                std_deviation = np.std(compatibility_deviations)
-                normalised_deviation = actual_deviation - average_deviation
-                if std_deviation != 0.0:
-                    normalised_deviation /= std_deviation
-                weight = np.exp(
-                    self.config.compatibility_factor * normalised_deviation
-                )
-                rank_difference = self._make_outlier_score(x["output_rank_base"], x["output_rank_comp"])
-                weighted_performance = rank_difference * weight
-                per_sequence_performance.append(weighted_performance)
+            outlier_scores = (relevant_df
+                .apply(lambda x: self._make_aware_outlier_score(x, input_feature, io_compatibility), axis=1)
+                .tolist()
+            )
 
             if "median" in self.config.refinement_metric:
-                return np.median(per_sequence_performance)
+                return np.median(outlier_scores)
             elif "mean" in self.config.refinement_metric:
-                return np.mean(per_sequence_performance)
+                return np.mean(outlier_scores)
         elif "accuracy" in self.config.refinement_metric:
             accuracy_ats = [
                 int(s) for s in self.config.refinement_metric.split("_") if s.isdigit()
@@ -508,7 +517,7 @@ class KnowledgeProcessor:
             .apply(lambda x: self._get_best_rank_of(x["output_converted"], x[predictions_comp]), axis=1)
         )
         ranked_df["rank_difference"] = (ranked_df
-            .apply(lambda x: x[output_rank_comp] - x[output_rank_base], axis=1)
+            .apply(lambda x: x[output_rank_base] - x[output_rank_comp], axis=1)
         )
 
         aggregated_ranked_df = ranked_df.copy(deep=True)
