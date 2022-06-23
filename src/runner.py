@@ -13,6 +13,7 @@ import random
 from pathlib import Path
 import json
 import matplotlib.pyplot as plt
+import shutil
 
 class RunState:
     metadata: SequenceMetadata
@@ -135,6 +136,7 @@ class ExperimentRunner:
         self._generate_confusion_artifacts(artifact_dir, metadata, model, test_dataset)
         self._generate_frequency_artifacts(artifact_dir, metadata, train_dataset)
         self._generate_weight_artifacts(artifact_dir, model)
+        self._generate_knowledge_artifacts(artifact_dir)
         mlflow.log_artifacts(artifact_dir)
 
     def _generate_metric_artifacts(
@@ -198,6 +200,13 @@ class ExperimentRunner:
         self, artifact_dir: str, model: models.BaseModel
     ):
         model.prediction_model.save_weights(artifact_dir + "trained_weights.h5")
+
+    def _generate_knowledge_artifacts(
+        self, artifact_dir: str
+    ):
+        if self.config.model_type == "file":
+            config = knowledge.KnowledgeConfig()
+            shutil.copyfile(config.file_knowledge, artifact_dir + "knowledge.json")
 
     def _create_dataset(
         self, sequence_df: pd.DataFrame

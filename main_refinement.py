@@ -235,6 +235,50 @@ def main_refinement(refinement_config: refinement.RefinementConfig):
 
     logging.info("Finished refinement run ({group})".format(group=refinement_timestamp))
 
+def main_generation(refinement_config: refinement.RefinementConfig):
+    refinement_timestamp = time.time()
+
+    reference_run_id = _do_reference_run(refinement_timestamp, refinement_config)
+    _write_original_knowledge(refinement_config)
+    original_run_id = _main()
+    _add_mlflow_tags_for_new_run(original_run_id, refinement_timestamp, "original")
+
+    refinement_run_ids = [original_run_id]
+    processor = refinement.KnowledgeProcessor(refinement_config)
+
+    for i in range(refinement_config.num_refinements):
+        logging.info("Removing harmful generated edges...")
+        refined_knowledge = processor.load_refined_knowledge(refinement_run_ids[-1], reference_run_id)
+        combined_knowledge = processor.load_original_knowledge()
+
+        # Ensure that only generated edges can be removed
+        for child, parents in refined_knowledge.items():
+            combined_knowledge[child] = list(set(combined_knowledge.get(child, [])).union(set(parents)))
+
+        _write_file_knowledge(combined_knowledge)
+        current_run_id = _main()
+        _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 2 * i, refinement_config)
+        refinement_run_ids.append(current_run_id)
+
+        if i < refinement_config.num_refinements - 1: # Skip adding noise in last iteration
+            generated_knowledge = _add_random_connections(combined_knowledge, refinement_config.edges_to_add)
+            _write_file_knowledge(generated_knowledge)
+            current_run_id = _main()
+            _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 2 * i + 1, refinement_config)
+            refinement_run_ids.append(current_run_id)
+
+        logging.info(
+            "Completed generation iteration {current} of {total}"
+            .format(current=i+1, total=refinement_config.num_refinements)
+        )
+
+    logging.info("Finished generation run ({group})".format(group=refinement_timestamp))
+    logging.info("reference run id: {reference_run_id}".format(reference_run_id=reference_run_id))
+    logging.info("original run id: {original_run_id}".format(original_run_id=original_run_id))
+
+    for run in refinement_run_ids[1:]:
+        logging.info("refinement run id: {refinement_run_id}".format(refinement_run_id=run))
+
 if __name__ == "__main__":
     refinement_config = refinement.RefinementConfig()
 
@@ -242,6 +286,8 @@ if __name__ == "__main__":
         main_refinement(refinement_config)
     elif refinement_config.mode == "v2":
         main_boosting(refinement_config)
+    elif refinement_config.mode == "gen":
+        main_generation(refinement_config)
     elif refinement_config.mode == "inject":
         mlflow.set_experiment("Domain Guided Monitoring")
         with mlflow.start_run() as run:
@@ -262,4 +308,4 @@ if __name__ == "__main__":
 
             state = runner.run_from_state(current_run_id, state)
     else:
-        logging.error("unknown correction mode")
+        logging.error("unknown refinement mode")
