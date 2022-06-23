@@ -240,7 +240,7 @@ class KnowledgeProcessor:
                 ):
                     continue
 
-                if attention_comp[child][parent] < self.config.min_edge_weight_gen:
+                if float(attention_comp[child][parent]) < self.config.min_edge_weight_gen:
                     continue
 
                 refined_knowledge[child].append(parent)
