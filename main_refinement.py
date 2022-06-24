@@ -10,6 +10,7 @@ from src.main import _log_all_configs_to_mlflow
 from src import ExperimentRunner, RunState
 import mlflow
 import pickle
+from pathlib import Path
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("matplotlib.font_manager").disabled = True
@@ -235,25 +236,41 @@ def main_refinement(refinement_config: refinement.RefinementConfig):
 
     logging.info("Finished refinement run ({group})".format(group=refinement_timestamp))
 
-def main_generation(refinement_config: refinement.RefinementConfig):
-    refinement_timestamp = time.time()
+def _get_knowledge_from_id(run_id: str):
+    run_knowledge_path = Path(
+            refinement_config.mlflow_dir
+            + "{run_id}/artifacts/knowledge.json".format(run_id=run_id)
+        )
+    if not run_knowledge_path.exists():
+        logging.debug("No knowledge file for run {} in MlFlow dir".format(run_id))
+        return {}
 
-    processor = refinement.KnowledgeProcessor(refinement_config)
-    original_knowledge = processor.load_original_knowledge()
-    num_connections_original = calculate_num_connections(original_knowledge)
+    with open(run_knowledge_path) as f:
+        return json.load(f)
 
+def _do_original_for_generation(timestamp: int, config: refinement.RefinementConfig) -> Tuple[str, Dict[str, List[str]]]:
     if len(refinement_config.original_run_id) > 0:
         original_run_id = refinement_config.original_run_id
     else:
-        # Do not use _write_original_knowledge, because we reuse the noise parameter for the generation
+        # Do not use _write_original_knowledge, because we reuse the noise parameter for the generation 
+        original_knowledge = refinement.KnowledgeProcessor(config).load_original_knowledge()
         _write_file_knowledge(original_knowledge)
         original_run_id = _main()
-        _add_mlflow_tags_for_new_run(original_run_id, refinement_timestamp, "original")
+        _add_mlflow_tags_for_new_run(original_run_id, timestamp, "original")
 
+    loaded_knowledge = _get_knowledge_from_id(original_run_id)
+    return (original_run_id, loaded_knowledge)
+
+def main_generation(refinement_config: refinement.RefinementConfig):
+    refinement_timestamp = time.time()
+
+    (original_run_id, original_knowledge) = _do_original_for_generation(refinement_timestamp, refinement_config)
     refinement_run_ids = [original_run_id]
-
+    num_connections_original = calculate_num_connections(original_knowledge)
     combined_knowledge = original_knowledge.copy()
 
+    processor = refinement.KnowledgeProcessor(refinement_config)
+    
     for i in range(refinement_config.num_refinements):
         generated_knowledge = _add_random_connections(combined_knowledge, refinement_config.edges_to_add)
         _write_file_knowledge(generated_knowledge)
