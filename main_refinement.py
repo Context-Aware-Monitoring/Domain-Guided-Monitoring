@@ -238,34 +238,47 @@ def main_refinement(refinement_config: refinement.RefinementConfig):
 def main_generation(refinement_config: refinement.RefinementConfig):
     refinement_timestamp = time.time()
 
-    reference_run_id = _do_reference_run(refinement_timestamp, refinement_config)
-    _write_original_knowledge(refinement_config)
-    original_run_id = _main()
-    _add_mlflow_tags_for_new_run(original_run_id, refinement_timestamp, "original")
+    processor = refinement.KnowledgeProcessor(refinement_config)
+    original_knowledge = processor.load_original_knowledge()
+    num_connections_original = calculate_num_connections(original_knowledge)
+
+    if len(refinement_config.original_run_id) > 0:
+        original_run_id = refinement_config.original_run_id
+    else:
+        # Do not use _write_original_knowledge, because we reuse the noise parameter for the generation
+        _write_file_knowledge(original_knowledge)
+        original_run_id = _main()
+        _add_mlflow_tags_for_new_run(original_run_id, refinement_timestamp, "original")
 
     refinement_run_ids = [original_run_id]
-    processor = refinement.KnowledgeProcessor(refinement_config)
+
+    combined_knowledge = original_knowledge.copy()
 
     for i in range(refinement_config.num_refinements):
-        logging.info("Removing harmful generated edges...")
-        refined_knowledge = processor.load_refined_knowledge(refinement_run_ids[-1], reference_run_id)
-        combined_knowledge = processor.load_original_knowledge()
-
-        # Ensure that only generated edges can be removed
-        for child, parents in refined_knowledge.items():
-            combined_knowledge[child] = list(set(combined_knowledge.get(child, [])).union(set(parents)))
-
-        _write_file_knowledge(combined_knowledge)
+        generated_knowledge = _add_random_connections(combined_knowledge, refinement_config.edges_to_add)
+        _write_file_knowledge(generated_knowledge)
         current_run_id = _main()
         _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 2 * i, refinement_config)
         refinement_run_ids.append(current_run_id)
 
-        if i < refinement_config.num_refinements - 1: # Skip adding noise in last iteration
-            generated_knowledge = _add_random_connections(combined_knowledge, refinement_config.edges_to_add)
-            _write_file_knowledge(generated_knowledge)
-            current_run_id = _main()
-            _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 2 * i + 1, refinement_config)
-            refinement_run_ids.append(current_run_id)
+        logging.info("Removing harmful generated edges...")
+        refined_knowledge = processor.load_refined_knowledge(refinement_run_ids[-1], refinement_run_ids[-2])
+        
+        # Ensure that only generated edges can be removed
+        for child, parents in refined_knowledge.items():
+            combined_knowledge[child] = list(set(original_knowledge.get(child, [])).union(set(parents)))
+
+        num_connections_current = calculate_num_connections(combined_knowledge)
+        if num_connections_current == num_connections_original:
+            logging.info(
+                "Refined knowledge has same number of connections as original knowledge, aborting refinement!"
+            )
+            break
+
+        _write_file_knowledge(combined_knowledge)
+        current_run_id = _main()
+        _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 2 * i + 1, refinement_config)
+        refinement_run_ids.append(current_run_id)
 
         logging.info(
             "Completed generation iteration {current} of {total}"
@@ -273,7 +286,6 @@ def main_generation(refinement_config: refinement.RefinementConfig):
         )
 
     logging.info("Finished generation run ({group})".format(group=refinement_timestamp))
-    logging.info("reference run id: {reference_run_id}".format(reference_run_id=reference_run_id))
     logging.info("original run id: {original_run_id}".format(original_run_id=original_run_id))
 
     for run in refinement_run_ids[1:]:
