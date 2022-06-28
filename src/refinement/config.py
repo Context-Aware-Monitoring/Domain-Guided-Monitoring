@@ -43,5 +43,6 @@ class RefinementConfig:
     restore_threshold: float = 0.0
     compatibility_factor: float = 0.0
     min_edge_weight_gen: float = 0.0
+    refinement_window_size: int = -1
 
     mode: str = "v2" # v1 for old correction, v2 for new

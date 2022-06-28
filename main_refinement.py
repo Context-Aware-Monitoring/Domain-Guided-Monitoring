@@ -264,10 +264,10 @@ def _do_original_for_generation(timestamp: int, config: refinement.RefinementCon
 def main_generation(refinement_config: refinement.RefinementConfig):
     refinement_timestamp = time.time()
 
-    (original_run_id, original_knowledge) = _do_original_for_generation(refinement_timestamp, refinement_config)
+    (original_run_id, baseline_knowledge) = _do_original_for_generation(refinement_timestamp, refinement_config)
     refinement_run_ids = [original_run_id]
-    num_connections_original = calculate_num_connections(original_knowledge)
-    combined_knowledge = original_knowledge.copy()
+    num_connections_original = calculate_num_connections(baseline_knowledge)
+    combined_knowledge = baseline_knowledge.copy()
 
     processor = refinement.KnowledgeProcessor(refinement_config)
     
@@ -280,10 +280,13 @@ def main_generation(refinement_config: refinement.RefinementConfig):
 
         logging.info("Removing harmful generated edges...")
         refined_knowledge = processor.load_refined_knowledge(refinement_run_ids[-1], refinement_run_ids[-2])
+        if refinement_config.refinement_window_size > -1:
+            baseline_index = max(0, i - refinement_config.refinement_window_size)
+            baseline_knowledge = _get_knowledge_from_id(refinement_run_ids[baseline_index])
         
         # Ensure that only generated edges can be removed
         for child, parents in refined_knowledge.items():
-            combined_knowledge[child] = list(set(original_knowledge.get(child, [])).union(set(parents)))
+            combined_knowledge[child] = list(set(baseline_knowledge.get(child, [])).union(set(parents)))
 
         num_connections_current = calculate_num_connections(combined_knowledge)
         if num_connections_current == num_connections_original:
