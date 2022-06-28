@@ -281,7 +281,7 @@ def main_generation(refinement_config: refinement.RefinementConfig):
         logging.info("Removing harmful generated edges...")
         refined_knowledge = processor.load_refined_knowledge(refinement_run_ids[-1], refinement_run_ids[-2])
         if refinement_config.refinement_window_size > -1:
-            baseline_index = max(0, i - refinement_config.refinement_window_size)
+            baseline_index = max(0, 2 * (i - refinement_config.refinement_window_size))
             baseline_knowledge = _get_knowledge_from_id(refinement_run_ids[baseline_index])
         
         # Ensure that only generated edges can be removed
