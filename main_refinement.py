@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 from mlflow.tracking import MlflowClient
 import random
 from src.main import _log_all_configs_to_mlflow
-from src import ExperimentRunner, RunState
+from src import ExperimentRunner, RunState, ExperimentConfig
 import mlflow
 import pickle
 from pathlib import Path
@@ -41,6 +41,7 @@ def _add_random_connections(original_knowledge: Dict[str, List[str]], percentage
     potential_connections = [
         (c, p) for c in children for p in parents if (c,p) not in connections and c != p
     ]
+    random.seed(ExperimentConfig().random_seed)
     connections_to_add = random.sample(
         potential_connections,
         k=min(len(potential_connections), int(percentage * len(connections)))
