@@ -191,11 +191,13 @@ class KnowledgeProcessor:
             records, columns=["child", "parent", "child_metric"]
         )
 
-        parent_metric_df = metric_df.groupby("parent")["child_metric"].mean().reset_index(name="parent_metric")
-        metric_df = metric_df.merge(parent_metric_df, on="parent")
+        if len(metric_df) > 0:
+            parent_metric_df = metric_df.groupby("parent")["child_metric"].mean().reset_index(name="parent_metric")
+            metric_df = metric_df.merge(parent_metric_df, on="parent")
+
         metric_df["refinement_metric"] = metric_df.apply(
             lambda x: self._interpolate_metric(x["child_metric"], x["parent_metric"]),
-            axis=1
+            result_type="reduce", axis=1
         )
 
         return metric_df

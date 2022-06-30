@@ -15,7 +15,9 @@ class RefinementConfig:
     max_edges_to_remove: int = 10
     max_refinement_metric: float = -1
     original_file_knowledge: Path = Path("data/original_file_knowledge.json")
-    edges_to_add: float = -1
+    edges_to_add: List[float] = dataclasses.field(
+        default_factory=lambda: [-1]
+    )
     reference_file_knowledge: Path = Path("data/reference_file_knowledge.json")
     mlflow_dir: str = "mlruns/1/"
     corrective_factor: List[float] = dataclasses.field(

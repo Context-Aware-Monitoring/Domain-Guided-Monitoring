@@ -58,9 +58,9 @@ def _write_original_knowledge(refinement_config: refinement.RefinementConfig) ->
     original_knowledge = refinement.KnowledgeProcessor(
         refinement_config
     ).load_original_knowledge()
-    if refinement_config.edges_to_add > 0:
-        logging.info("Adding %f noise to original knowledge", refinement_config.edges_to_add)
-        original_knowledge = _add_random_connections(original_knowledge, refinement_config.edges_to_add)
+    if refinement_config.edges_to_add[0] > 0:
+        logging.info("Adding %f noise to original knowledge", refinement_config.edges_to_add[0])
+        original_knowledge = _add_random_connections(original_knowledge, refinement_config.edges_to_add[0])
     _write_file_knowledge(original_knowledge)
     return calculate_num_connections(original_knowledge)
 
@@ -261,6 +261,9 @@ def _do_original_for_generation(timestamp: int, config: refinement.RefinementCon
     loaded_knowledge = _get_knowledge_from_id(original_run_id)
     return (original_run_id, loaded_knowledge)
 
+def _get_noise_amount_for_iteration(config: refinement.RefinementConfig, i: int) -> float:
+    return config.edges_to_add[min(i, len(config.edges_to_add) - 1)]
+
 def main_generation(refinement_config: refinement.RefinementConfig):
     refinement_timestamp = time.time()
 
@@ -272,7 +275,9 @@ def main_generation(refinement_config: refinement.RefinementConfig):
     processor = refinement.KnowledgeProcessor(refinement_config)
     
     for i in range(refinement_config.num_refinements):
-        generated_knowledge = _add_random_connections(combined_knowledge, refinement_config.edges_to_add)
+        noise_amount = _get_noise_amount_for_iteration(refinement_config, i)
+        logging.info("Adding %f noise to current knowledge", noise_amount)
+        generated_knowledge = _add_random_connections(combined_knowledge, noise_amount)
         _write_file_knowledge(generated_knowledge)
         current_run_id = _main()
         _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 2 * i, refinement_config)
