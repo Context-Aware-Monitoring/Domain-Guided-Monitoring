@@ -11,6 +11,7 @@ from src import ExperimentRunner, RunState, ExperimentConfig
 import mlflow
 import pickle
 from pathlib import Path
+import numpy as np
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("matplotlib.font_manager").disabled = True
@@ -34,18 +35,23 @@ def _write_reference_knowledge(refinement_config: refinement.RefinementConfig) -
     _write_file_knowledge(reference_knowledge)
     return calculate_num_connections(reference_knowledge)
 
-def _add_random_connections(original_knowledge: Dict[str, List[str]], percentage: float = 0.1) -> Dict[str, List[str]]:
+def _add_random_connections(
+    original_knowledge: Dict[str, List[str]],
+    percentage: float = 0.1,
+    generator = np.random.default_rng(ExperimentConfig().random_seed)
+) -> Dict[str, List[str]]:
     connections = set([(child, parent) for child, parents in original_knowledge.items() for parent in parents if child != parent])
     children = list(set([x[0] for x in connections]))
     parents = list(set([x[1] for x in connections]))
     potential_connections = [
         (c, p) for c in children for p in parents if (c,p) not in connections and c != p
     ]
-    random.seed(ExperimentConfig().random_seed)
-    connections_to_add = random.sample(
+    connections_to_add_array = generator.choice(
         potential_connections,
-        k=min(len(potential_connections), int(percentage * len(connections)))
+        min(len(potential_connections), int(percentage * len(connections))),
+        replace=False
     )
+    connections_to_add = [tuple(x) for x in connections_to_add_array]
 
     logging.debug("Added %d connections from originally %d connections, %d children, %d parents", len(connections_to_add), len(connections), len(children), len(parents))
     updated_knowledge: Dict[str, List[str]] = {}
@@ -268,6 +274,8 @@ def _get_noise_amount_for_iteration(config: refinement.RefinementConfig, i: int)
 def main_generation(refinement_config: refinement.RefinementConfig):
     refinement_timestamp = time.time()
 
+    generator = np.random.default_rng(ExperimentConfig().random_seed)
+
     (original_run_id, baseline_knowledge) = _do_original_for_generation(refinement_timestamp, refinement_config)
     refinement_run_ids = [original_run_id]
     num_connections_original = calculate_num_connections(baseline_knowledge)
@@ -278,7 +286,7 @@ def main_generation(refinement_config: refinement.RefinementConfig):
     for i in range(refinement_config.num_refinements):
         noise_amount = _get_noise_amount_for_iteration(refinement_config, i)
         logging.info("Adding %f noise to current knowledge", noise_amount)
-        generated_knowledge = _add_random_connections(combined_knowledge, noise_amount)
+        generated_knowledge = _add_random_connections(combined_knowledge, noise_amount, generator)
         _write_file_knowledge(generated_knowledge)
         current_run_id = _main()
         _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 2 * i, refinement_config)
