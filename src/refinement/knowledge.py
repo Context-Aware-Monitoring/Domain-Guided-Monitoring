@@ -65,7 +65,7 @@ class KnowledgeProcessor:
             normalised_deviation /= std_deviation
         
         activation = np.exp(self.config.compatibility_factor * normalised_deviation)
-        activation = 1 / activation if x["rank_difference"] >= 0 else activation
+        activation = 1 / activation if x["rank_difference"] < 0 else activation
         
         rank_difference = self._make_outlier_score(x["output_rank_base"], x["output_rank_comp"])
         return rank_difference * activation
