@@ -110,6 +110,13 @@ class KnowledgeProcessor:
                 relevant_df[relevant_df["output_rank_comp"] < accuracy_at]
             ) / len(relevant_df)
             return accuracy_comp - accuracy_base
+        elif "standalone" in self.config.refinement_metric:
+            # Computes accuracy at sequence length for the comp only
+            successful_count = (relevant_df
+                .apply(lambda x: 1 if x["output_rank_comp"] < len(ast.literal_eval(x["output"])) else 0, axis=1)
+                .sum()
+            )
+            return successful_count / len(relevant_df)
 
         logging.error("Unknown refinement metric: %s", self.config.refinement_metric)
         return 0
