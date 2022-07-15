@@ -34,6 +34,7 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
         self._init_basic_embedding_variables(knowledge)
         self._init_connection_information(knowledge)
         self._init_corrective_terms()
+        self._init_attention_score_overwrite()
 
     def _init_basic_embedding_variables(self, knowledge: BaseKnowledge):
         logging.info("Initializing %s basic embedding variables", self.embedding_name)
@@ -112,6 +113,9 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
             shape=(self.num_connections),
         )
 
+    def _init_attention_score_overwrite(self):
+        self.attention_score_overwrite = tf.constant(0.0, shape=(self.num_connections, 1))
+
     def get_corrective_terms_as_list(self):
         return self.corrective_terms.numpy().tolist()
 
@@ -128,6 +132,16 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
 
         new_corrective_terms = tf.convert_to_tensor(term_list, dtype=tf.float32)
         self.corrective_terms.assign(tf.multiply(self.corrective_terms, new_corrective_terms))
+
+    def overwrite_attention_scores(self, connections: Dict[Tuple[str, str], float]):
+        scores = [[0.0]] * self.num_connections
+
+        for ((outgoing, incoming), score) in connections.items():
+            index = self._get_connection_index_from_labels(outgoing, incoming)
+
+            scores[index] = [score]
+
+        self.attention_score_overwrite = tf.convert_to_tensor(scores, dtype=tf.float32)
 
     def _get_connection_index_from_labels(self, outgoing: str, incoming: str):
         outgoing_idx = self.extended_vocab[outgoing]
@@ -170,6 +184,9 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
             self.w(attention_embedding_matrix)
         )  # shape: (num_connections, 1)
         scores = tf.math.exp(scores)
+
+        if self.config.overwrite_attention_scores:
+            scores = self.attention_score_overwrite
 
         if self.config.use_corrective_terms:
             scores = tf.multiply(scores, self.corrective_terms[:,tf.newaxis])

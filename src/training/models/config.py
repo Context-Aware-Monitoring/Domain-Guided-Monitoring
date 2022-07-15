@@ -33,6 +33,7 @@ class ModelConfig:
         default_factory=lambda: []
     )
     use_corrective_terms: bool = True
+    overwrite_attention_scores: bool = False
 
 
 @dataclass_cli.add

@@ -138,10 +138,11 @@ def _do_reference_run(timestamp: int, config: refinement.RefinementConfig) -> st
 
 
 def _do_original_run(timestamp: int, config: refinement.RefinementConfig) -> Tuple[str, RunState]:
-    _write_original_knowledge(config)
-
     if len(config.original_run_id) > 0:
         original_run_id = config.original_run_id
+        original_knowledge = _get_knowledge_from_id(original_run_id)
+        _write_file_knowledge(original_knowledge)
+
         state = ExperimentRunner().prepare_run()
         if config.keep_state_from_original:
             weights_path = (
@@ -151,6 +152,7 @@ def _do_original_run(timestamp: int, config: refinement.RefinementConfig) -> Tup
             state.model.prediction_model.load_weights(weights_path)
         return (original_run_id, state)
     else:
+        _write_original_knowledge(config)
         with mlflow.start_run() as run:
             original_run_id = run.info.run_id
             _log_all_configs_to_mlflow()
@@ -336,22 +338,33 @@ if __name__ == "__main__":
         main_generation(refinement_config)
     elif refinement_config.mode == "inject":
         mlflow.set_experiment("Domain Guided Monitoring")
-        with mlflow.start_run() as run:
+        refinement_timestamp = time.time()
+
+        (original_run_id, state) = _do_original_run(refinement_timestamp, refinement_config)
+
+        with mlflow.active_run() or mlflow.start_run() as run:
             current_run_id = run.info.run_id
             runner = ExperimentRunner()
-            state = runner.prepare_run()
             _log_all_configs_to_mlflow()
 
-            with open("data/injected_comparison.pkl", "rb") as f:
-                comparison = pickle.load(f)
+            with open("data/injected_attention.json", "r") as f:
+                injected_attention = json.load(f)
 
-            edges_to_correct: Dict[Tuple[str, str], float] = {}
+            connections: Dict[Tuple[str, str], float] = {}
+            for child, parents in injected_attention.items():
+                for parent, score in parents.items():
+                    # Scale percentage attention to score, which gets calculated to a percentage through the softmax
+                    # Use 10000 to get approximate resolution of .01%
 
-            for _, row in comparison.iterrows():
-                edges_to_correct[(row["child"], row["parent"])] = row["refinement_score"]
+                    connections[(child, parent)] = float(score) * 10000
 
-            state.model.embedding_layer.update_corrective_terms(edges_to_correct)
+            state.model.embedding_layer.overwrite_attention_scores(connections)
+            state.model.rnn_layer.trainable = refinement_config.freeze_rnn_sequence[0]
+            state.model.embedding_layer.trainable = refinement_config.freeze_embeddings_sequence[0]
+            state.model.activation_layer.trainable = refinement_config.freeze_activation_sequence[0]
 
+            _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 0, refinement_config)
             state = runner.run_from_state(current_run_id, state)
+
     else:
         logging.error("unknown refinement mode")
