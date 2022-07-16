@@ -359,9 +359,9 @@ if __name__ == "__main__":
                     connections[(child, parent)] = float(score) * 10000
 
             state.model.embedding_layer.overwrite_attention_scores(connections)
-            state.model.rnn_layer.trainable = refinement_config.freeze_rnn_sequence[0]
-            state.model.embedding_layer.trainable = refinement_config.freeze_embeddings_sequence[0]
-            state.model.activation_layer.trainable = refinement_config.freeze_activation_sequence[0]
+            state.model.rnn_layer.trainable = refinement_config.freeze_rnn_sequence[0] != 1
+            state.model.embedding_layer.trainable = refinement_config.freeze_embeddings_sequence[0] != 1
+            state.model.activation_layer.trainable = refinement_config.freeze_activation_sequence[0] != 1
 
             _add_mlflow_tags_for_refinement(current_run_id, refinement_timestamp, 0, refinement_config)
             state = runner.run_from_state(current_run_id, state)
