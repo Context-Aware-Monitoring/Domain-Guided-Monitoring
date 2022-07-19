@@ -59,9 +59,9 @@ class BaseEmbedding:
         initializer_seed: int,
         description_vocab: Dict[int, str],
     ) -> tf.keras.initializers.Initializer:
-        if initializer_name == "random_uniform":
+        if initializer_name == "glorot_uniform":
             return tf.keras.initializers.GlorotUniform(seed=initializer_seed)
-        elif initializer_name == "random_normal":
+        elif initializer_name == "glorot_normal":
             return tf.keras.initializers.GlorotNormal(seed=initializer_seed)
         elif initializer_name == "fasttext":
             initializer = FastTextInitializer(self.config.embedding_dim)

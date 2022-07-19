@@ -13,9 +13,9 @@ class ModelConfig:
     attention_dim: int = 16
     base_feature_embeddings_trainable: bool = True
     base_hidden_embeddings_trainable: bool = True
-    feature_embedding_initializer: str = "random_uniform"
+    feature_embedding_initializer: str = "glorot_uniform"
     feature_embedding_initializer_seed: int = 12345
-    hidden_embedding_initializer: str = "random_uniform"
+    hidden_embedding_initializer: str = "glorot_uniform"
     hidden_embedding_initializer_seed: int = 67890
     distribute_strategy: str = ""
     best_model_metric: str = "val_loss"
@@ -34,6 +34,10 @@ class ModelConfig:
     )
     use_corrective_terms: bool = True
     overwrite_attention_scores: bool = False
+    attention_w_initializer: str = "glorot_uniform"
+    attention_w_initializer_seed: int = 12345
+    attention_u_initializer: str = "glorot_uniform"
+    attention_u_initializer_seed: int = 12345
 
 
 @dataclass_cli.add

@@ -7,7 +7,6 @@ from .base import BaseEmbedding
 import logging
 from tqdm import tqdm
 
-
 class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
     def __init__(
         self, knowledge: BaseKnowledge, config: ModelConfig, embedding_name: str
@@ -26,15 +25,48 @@ class KnowledgeEmbedding(BaseEmbedding, tf.keras.Model):
             use_bias=True,
             activation="tanh",
             kernel_regularizer=super()._get_kernel_regularizer(scope="attention"),
+            kernel_initializer=self._get_attention_w_initializer(),
+            # We intentionally don't set a specific bias initializer
         )
         self.u = tf.keras.layers.Dense(
-            1, use_bias=False, kernel_regularizer=super()._get_kernel_regularizer(scope="attention")
+            1, use_bias=False, kernel_regularizer=super()._get_kernel_regularizer(scope="attention"),
+            kernel_initializer=self._get_attention_u_initializer()
         )
 
         self._init_basic_embedding_variables(knowledge)
         self._init_connection_information(knowledge)
         self._init_corrective_terms()
         self._init_attention_score_overwrite()
+
+    def _get_attention_initializer(
+        self,
+        initializer_name: str,
+        initializer_seed: int
+    ) -> tf.keras.initializers.Initializer:
+        if initializer_name == "glorot_uniform":
+            return tf.keras.initializers.GlorotUniform(seed=initializer_seed)
+        elif initializer_name == "he_uniform":
+            return tf.keras.initializers.he_uniform(seed=initializer_seed)
+        elif initializer_name == "lecun_uniform":
+            return tf.keras.initializers.lecun_uniform(seed=initializer_seed)
+        elif initializer_name == "ones":
+            return tf.keras.initializers.Ones()
+        elif initializer_name == "random_uniform":
+            return tf.keras.initializers.RandomUniform(seed=initializer_seed)
+        else:
+            logging.error("Unknown initializer %s", initializer_name)
+
+    def _get_attention_w_initializer(self) -> tf.keras.initializers.Initializer:
+        return self._get_attention_initializer(
+            self.config.attention_w_initializer,
+            self.config.attention_w_initializer_seed
+        )
+
+    def _get_attention_u_initializer(self) -> tf.keras.initializers.Initializer:
+        return self._get_attention_initializer(
+            self.config.attention_u_initializer,
+            self.config.attention_u_initializer_seed
+        )
 
     def _init_basic_embedding_variables(self, knowledge: BaseKnowledge):
         logging.info("Initializing %s basic embedding variables", self.embedding_name)
