@@ -3,7 +3,7 @@ import numpy as np
 from typing import Dict, List, Any
 from tqdm import tqdm
 
-from comparison import load_comparison_df
+from utils.comparison import load_comparison_df
 
 
 def calculate_comparison_run_ids(

@@ -10,6 +10,6 @@ class KnowledgeConfig:
     add_causality_prefix: bool = False
     file_knowledge: Path = Path("data/file_knowledge.json")
     combined_knowledge_components: List[str] = dataclasses.field(
-        default_factory=lambda: ["gram", "text", "causal",],
+        default_factory=lambda: ["gram", "text", "causal_heuristic",],
     )
     build_text_hierarchy: bool = False

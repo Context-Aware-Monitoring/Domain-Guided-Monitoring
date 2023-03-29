@@ -8,8 +8,12 @@ from src import refinement
 def _log_all_configs_to_mlflow():
     for config in [
         ExperimentConfig(),
+        preprocessing.bgl.BGLPreprocessorConfig(),
         preprocessing.huawei.HuaweiPreprocessorConfig(),
         preprocessing.mimic.MimicPreprocessorConfig(),
+        preprocessing.ts_transformation.TimeSeriesTransformerConfig(),
+        preprocessing.hdfs.HDFSPreprocessorConfig(),
+        preprocessing.tbird.ThunderBirdPreprocessorConfig(),
         sequences.SequenceConfig(),
         models.ModelConfig(),
         models.TextualPaperModelConfig(),

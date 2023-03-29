@@ -1,7 +1,7 @@
 from pyvis.network import Network
 from typing import Dict, List, Tuple, Set, Optional
 
-from base import load_attention_weights
+from utils.base import load_attention_weights
 
 
 def calculate_attention_importances(

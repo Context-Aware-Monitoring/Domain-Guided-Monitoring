@@ -1,6 +1,31 @@
 # Domain-Guided-Monitoring
 Can we use domain knowledge to better monitor complex systems?
 
+## Differences between this version and the original
+This version of DomainML was created during the course of my thesis *Generating
+Causal Domain Knowledge for Cloud Systems Monitoring*. Some corrections were
+made and some new features were added. 
+
+The most important differences are:
+- You can now save and load knowledge via the
+  `--experimentconfig_load_knowledge_df`,
+  `--experimentconfig_serialize_knowledge_df`, and
+  `--experimentconfig_knowledge_df_file` command options
+- A variety of causal algorithms are now available via the [cdt package](https://fentechsolutions.github.io/CausalDiscoveryToolbox/html/index.html). To use them, simply change
+  the `--experimentconfig_model_type` to causal_{your_algo}. The list of
+  available causal algorithms can be found in
+  `src/features/preprocessing/{your_dataset}`
+- Timestamps can be removed from the Huawei dataset. By default, they will be
+  removed, so if you don't want that to happen add use the command parameter
+  `--no-huaweipreprocessorconfig_remove_dates_from_payload`
+- The BGL and HDFS datasets now work with DomainML
+- Some new notebooks to analyze the results and reproduce my results from the
+  paper can be found under `notebooks`
+- Note that if you want to run any notebooks and import some of the classes or
+  functions from the source code, you will have to comment out
+  `@dataclass_cli.add` in the source code, restart your Jupyter kernel, and then
+  run the notebook cells. This is a weird bug.
+
 ## Repository Structure
 This repo is structured as follows:
 - `notebooks/` contains some jupyter notebooks used for simple exploration and experimentation.
@@ -20,7 +45,13 @@ This repo is structured as follows:
 For now, this repository supports two types of datasets:
 - [MIMIC dataset](https://mimic.physionet.org/about/mimic/) and
 - Huawei log dataset.
-If you want to add a new type of dataset, look at the preprocessors implemented in `src/features/preprocessing/` and put your own implementation there.
+- [HDFS](https://www.kaggle.com/datasets/omduggineni/loghub-hadoop-distributed-file-system-log-data)
+- [BGL](https://www.kaggle.com/datasets/omduggineni/loghub-bgl-log-data)
+
+If you want to add a new type of dataset, look at the preprocessors implemented
+in `src/features/preprocessing/` and put your own implementation there.
+
+The HDFS and BGL raw log files can be preprocessed using `notebooks/logs_to_df.ipynb`.
 
 ### Supported Expert Knowledge
 With this repository, the following types of expert knowledge are supported:
@@ -52,3 +83,8 @@ In order to run this code, you need Anaconda + Python >= 3.8. This repository co
   -  `--experimentconfig_model_type`: use this to choose the knowledge model you want to run; valid values are `simple`, `gram`, `text` and `causal`
   -  to see the full list of options run `python main.py -h`
 - **Visualize Results**: Metrics, artefacts and parameters of an experiment run are logged in MLFlow. You can use the mlflow UI to get a good overview over the experiment results. Execute `mlflow ui` to start mlflow UI on port 5000.
+
+## Run via Docker
+Instead of running the experiments directly on your host machine, you can build
+the Docker image described in `Dockerfile` and start a container for the
+experiments. The run command for the docker container can be found in `docker_run.sh`

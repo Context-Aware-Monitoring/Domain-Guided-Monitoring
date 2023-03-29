@@ -1,6 +1,9 @@
 # Created by https://www.toptal.com/developers/gitignore/api/vim,code,python,pycharm,jupyternotebooks
 # Edit at https://www.toptal.com/developers/gitignore?templates=vim,code,python,pycharm,jupyternotebooks
 
+## Misc ##
+.tmp
+
 ### Code ###
 .vscode/*
 !.vscode/tasks.json
@@ -312,13 +315,12 @@ tests/mlruns/**
 # Tensorflow output
 *.tsv
 # notebook output
-notebooks/*.html
+# notebooks/*.html
 notebooks/*.png
 notebooks/*.csv
 notebooks/*.json
 notebooks/exploration/**
 **.png
-**.html
 **.pkl
 **.csv
 **.txt

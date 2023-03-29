@@ -3,14 +3,14 @@ import numpy as np
 import ast
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple, Callable
-from base import (
+from utils.base import (
     get_best_rank_of,
     get_frequency_list,
     load_input_frequency_dict,
     load_output_percentile_mapping_dict,
     load_attention_weights,
 )
-from attention_graph import calculate_attention_importances
+from utils.attention_graph import calculate_attention_importances
 
 
 def add_input_percentiles(

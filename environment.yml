@@ -1,6 +1,6 @@
-name: healthcare-aiops
+name: base
 dependencies:
-  - python>=3.8
+  - python=3.8
   - pandas
   - numpy=1.18.5
   - scikit-learn
@@ -8,17 +8,21 @@ dependencies:
   - seaborn
   - tqdm
   - lxml
+  - conda-forge::fasttext
   # Plotting
   - conda-forge::nbformat
   - plotly::plotly
+  - conda-forge::pygraphviz
   - seaborn
   - jupyter
   - notebook
   - pip
   - pip:
     - dc-cli
-    - fasttext
     - pyvis
     - beautifulsoup4
     - mlflow
-    - tensorflow==v2.2
+    - tensorflow==2.2
+    - cdt==0.6.0
+    - networkx==2.8.7
+    - protobuf==3.20.*

@@ -26,32 +26,38 @@ class ExperimentRunner:
         tf.random.set_seed(self.config.tensorflow_seed)
         random.seed(self.config.random_seed)
         sequence_df = self._load_sequences()
-        if self.config.max_data_size > 0 and self.config.max_data_size < len(
-            sequence_df
-        ):
-            logging.info(
-                "Only using first %d rows of sequence_df with %d rows",
-                self.config.max_data_size,
-                len(sequence_df),
-            )
-            sequence_df = sequence_df[0 : self.config.max_data_size]
-
         metadata = self._collect_sequence_metadata(sequence_df)
         (train_dataset, test_dataset) = self._create_dataset(sequence_df)
         (knowledge, model) = self._load_model(metadata)
-        knowledge = self._build_model(metadata, knowledge, model)
 
-        model.train_dataset(
-            train_dataset,
-            test_dataset,
-            self.multilabel_classification,
-            self.config.n_epochs,
-        )
+        if self.config.only_generate_knowledge:
+            # Table 2.6 in DomainML thesis
+            v_in = len(knowledge.vocab)
+            v_g = len(knowledge.extended_vocab)
+            print(f"V_G: {v_g}")
+            print(f"V_in: {v_in}")
+            print(f"V_hidden: {v_g - v_in}")
+            edges = set()
+            for i in range(len(knowledge.vocab)):
+                connections = knowledge.get_connections_for_idx(i)
+                for connection in connections:
+                    edges.add((i, connection))
+            print(f'E_G: {len(edges)}')
 
-        self._log_dataset_info(train_dataset, test_dataset, metadata)
-        self._generate_artifacts(
-            metadata, train_dataset, test_dataset, knowledge, model
-        )
+        if not self.config.only_generate_knowledge:
+            knowledge = self._build_model(metadata, knowledge, model)
+
+            model.train_dataset(
+                train_dataset,
+                test_dataset,
+                self.multilabel_classification,
+                self.config.n_epochs,
+            )
+
+            self._log_dataset_info(train_dataset, test_dataset, metadata)
+            self._generate_artifacts(
+                metadata, train_dataset, test_dataset, knowledge, model
+            )
         self._set_mlflow_tags(metadata)
         plt.close("all")
         logging.info("Finished run %s", self.run_id)
@@ -70,10 +76,13 @@ class ExperimentRunner:
     def _set_mlflow_tags(self, metadata: sequences.SequenceMetadata):
         mlflow.set_tag("sequence_type", self.config.sequence_type)
         mlflow.set_tag("model_type", self.config.model_type)
-        if len(metadata.y_vocab) == 1:
-            mlflow.set_tag("task_type", "risk_prediction")
+        if self.config.only_generate_knowledge:
+            mlflow.set_tag("task_type", "knowledge_generation")
         else:
-            mlflow.set_tag("task_type", "sequence_prediction")
+            if len(metadata.y_vocab) == 1:
+                mlflow.set_tag("task_type", "risk_prediction")
+            else:
+                mlflow.set_tag("task_type", "sequence_prediction")
 
     def _generate_artifacts(
         self,
@@ -168,7 +177,7 @@ class ExperimentRunner:
                     seed=self.config.dataset_shuffle_seed,
                     reshuffle_each_iteration=True,
                 )
-                .batch(self.config.batch_size)
+                .batch(self.config.batch_size, drop_remainder=False)
                 .prefetch(tf.data.experimental.AUTOTUNE)
             )
             test_dataset = (
@@ -178,7 +187,7 @@ class ExperimentRunner:
                     output_types=(tf.float32, tf.float32),
                 )
                 .cache(self._get_cache_file_name(is_test=True))
-                .batch(self.config.batch_size)
+                .batch(self.config.batch_size, drop_remainder=False)
                 .prefetch(tf.data.experimental.AUTOTUNE)
             )
 
@@ -190,7 +199,7 @@ class ExperimentRunner:
             )
             train_dataset = (
                 tf.data.Dataset.from_tensor_slices((split.train_x, split.train_y),)
-                .batch(self.config.batch_size)
+                .batch(self.config.batch_size, drop_remainder=False)
                 .prefetch(tf.data.experimental.AUTOTUNE)
                 .cache()
                 .shuffle(
@@ -201,7 +210,7 @@ class ExperimentRunner:
             )
             test_dataset = (
                 tf.data.Dataset.from_tensor_slices((split.test_x, split.test_y),)
-                .batch(self.config.batch_size)
+                .batch(self.config.batch_size, drop_remainder=False)
                 .prefetch(tf.data.experimental.AUTOTUNE)
                 .cache()
             )
@@ -260,6 +269,26 @@ class ExperimentRunner:
         model.build(metadata, base_knowledge)
         return base_knowledge
 
+    def _serialize_knowledge_df(self, knowledge_df: pd.DataFrame) -> None:
+        knowledge_file_path = Path(self.config.knowledge_df_file)
+        knowledge_df.to_csv(knowledge_file_path, index=False)
+
+    def _load_knowledge_df(self, generator_func, **kwargs) -> pd.DataFrame:
+        knowledge_df: pd.DataFrame = pd.DataFrame()
+        if self.config.load_knowledge_df:
+            knowledge_file_path = Path(self.config.knowledge_df_file)
+            if not knowledge_file_path.exists() or not self.config.knowledge_df_file.endswith('.csv'):
+                logging.info(f"Unable to load knowledge dataframe from path {self.config.knowledge_df_file}.")
+                logging.info("Generating the knowledge from scratch instead...")
+                knowledge_df = generator_func(**kwargs)
+            else:
+                logging.info("Knowledge found. Deserializing now...")
+                knowledge_df = pd.read_csv(knowledge_file_path)
+        else:
+            knowledge_df = generator_func(**kwargs)
+        
+        return knowledge_df
+
     def _load_model(
         self, metadata: sequences.SequenceMetadata
     ) -> Tuple[knowledge.BaseKnowledge, models.BaseModel]:
@@ -288,7 +317,7 @@ class ExperimentRunner:
             model = models.DescriptionPaperModel()
             return (description_knowledge, model)
 
-        elif self.config.model_type == "causal":
+        elif self.config.model_type.startswith("causal_"):
             causality_knowledge = self._load_causal_knowledge(metadata)
             model = models.CausalityModel()
             return (causality_knowledge, model)
@@ -318,7 +347,7 @@ class ExperimentRunner:
             if knowledge_type == "gram":
                 hierarchy_knowledge = self._load_hierarchy_knowledge(metadata)
                 combined_knowledge.add_knowledge(hierarchy_knowledge)
-            elif knowledge_type == "causal":
+            elif knowledge_type == "causal_heuristic":
                 causal_knowledge = self._load_causal_knowledge(metadata)
                 combined_knowledge.add_knowledge(causal_knowledge)
             elif knowledge_type == "text":
@@ -352,7 +381,51 @@ class ExperimentRunner:
             description_preprocessor = preprocessing.ConcurrentAggregatedLogsDescriptionPreprocessor(
                 preprocessing.HuaweiPreprocessorConfig()
             )
-            description_df = description_preprocessor.load_data()
+            description_df = self._load_knowledge_df(description_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(description_df)
+            description_knowledge = knowledge.DescriptionKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            description_knowledge.build_knowledge_from_df(
+                description_df, metadata.x_vocab
+            )
+            return description_knowledge
+        elif self.config.sequence_type == "bgl_logs":
+            description_preprocessor = preprocessing.BGLLogsDescriptionPreprocessor(
+                preprocessing.BGLPreprocessorConfig()
+            )
+            description_df = self._load_knowledge_df(description_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(description_df)
+            description_knowledge = knowledge.DescriptionKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            description_knowledge.build_knowledge_from_df(
+                description_df, metadata.x_vocab
+            )
+            return description_knowledge
+        elif self.config.sequence_type == "hdfs_logs":
+            description_preprocessor = preprocessing.HDFSLogsDescriptionPreprocessor(
+                preprocessing.HDFSPreprocessorConfig()
+            )
+            description_df = self._load_knowledge_df(description_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(description_df)
+            description_knowledge = knowledge.DescriptionKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            description_knowledge.build_knowledge_from_df(
+                description_df, metadata.x_vocab
+            )
+            return description_knowledge
+        elif self.config.sequence_type == "tbird_logs":
+            description_preprocessor = preprocessing.ThunderBirdLogsDescriptionPreprocessor(
+                preprocessing.ThunderBirdPreprocessorConfig()
+            )
+            description_df = self._load_knowledge_df(description_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(description_df)
             description_knowledge = knowledge.DescriptionKnowledge(
                 config=knowledge.KnowledgeConfig(),
             )
@@ -384,23 +457,70 @@ class ExperimentRunner:
     def _load_causal_knowledge(
         self, metadata: sequences.SequenceMetadata
     ) -> knowledge.CausalityKnowledge:
-        causality_preprocessor: preprocessing.Preprocessor
+        causal_algorithm = self.config.model_type.split('_')[1]
         if self.config.sequence_type == "huawei_logs":
             causality_preprocessor = preprocessing.ConcurrentAggregatedLogsCausalityPreprocessor(
                 config=preprocessing.HuaweiPreprocessorConfig(),
-            )
-            causality_df = causality_preprocessor.load_data()
+            ) 
+            causality_df = self._load_knowledge_df(causality_preprocessor.load_data, 
+                algorithm=causal_algorithm)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(causality_df)
             causality = knowledge.CausalityKnowledge(
                 config=knowledge.KnowledgeConfig(),
             )
             causality.build_causality_from_df(causality_df, metadata.x_vocab)
             return causality
-        elif self.config.sequence_type == "mimic":
+        elif self.config.sequence_type == "mimic" and causal_algorithm == "heuristic":
             mimic_config = preprocessing.MimicPreprocessorConfig()
             causality_preprocessor = preprocessing.KnowlifePreprocessor(
                 config=mimic_config,
             )
-            causality_df = causality_preprocessor.load_data()
+            causality_df = self._load_knowledge_df(causality_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(causality_df)
+            causality = knowledge.CausalityKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            causality.build_causality_from_df(causality_df, metadata.x_vocab)
+            return causality
+        elif self.config.sequence_type == "bgl_logs":
+            causality_preprocessor = preprocessing.BGLLogsCausalityPreprocessor(
+                config=preprocessing.BGLPreprocessorConfig(),
+            ) 
+            causality_df = self._load_knowledge_df(causality_preprocessor.load_data, 
+                algorithm=causal_algorithm
+            )
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(causality_df)
+            causality = knowledge.CausalityKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            causality.build_causality_from_df(causality_df, metadata.x_vocab)
+            return causality
+        elif self.config.sequence_type == "hdfs_logs":
+            causality_preprocessor = preprocessing.HDFSLogsCausalityPreprocessor(
+                config=preprocessing.HDFSPreprocessorConfig(),
+            ) 
+            causality_df = self._load_knowledge_df(causality_preprocessor.load_data, 
+                algorithm=causal_algorithm, 
+            )
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(causality_df)
+            causality = knowledge.CausalityKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            causality.build_causality_from_df(causality_df, metadata.x_vocab)
+            return causality
+        elif self.config.sequence_type == "tbird_logs":
+            causality_preprocessor = preprocessing.ThunderBirdLogsCausalityPreprocessor(
+                config=preprocessing.ThunderBirdPreprocessorConfig(),
+            ) 
+            causality_df = self._load_knowledge_df(causality_preprocessor.load_data, 
+                algorithm=causal_algorithm, 
+            )
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(causality_df)
             causality = knowledge.CausalityKnowledge(
                 config=knowledge.KnowledgeConfig(),
             )
@@ -435,7 +555,9 @@ class ExperimentRunner:
             hierarchy_preprocessor = preprocessing.ConcurrentAggregatedLogsHierarchyPreprocessor(
                 preprocessing.HuaweiPreprocessorConfig()
             )
-            hierarchy_df = hierarchy_preprocessor.load_data()
+            hierarchy_df = self._load_knowledge_df(hierarchy_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(hierarchy_df)
             hierarchy = knowledge.HierarchyKnowledge(
                 config=knowledge.KnowledgeConfig(),
             )
@@ -444,6 +566,42 @@ class ExperimentRunner:
         elif self.config.sequence_type == "c24":
             hierarchy_preprocessor = preprocessing.C24HierarchyPreprocessor()
             hierarchy_df = hierarchy_preprocessor.load_data()
+            hierarchy = knowledge.HierarchyKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            hierarchy.build_hierarchy_from_df(hierarchy_df, metadata.x_vocab)
+            return hierarchy
+        elif self.config.sequence_type == "bgl_logs":
+            hierarchy_preprocessor = preprocessing.BGLLogsHierarchyPreprocessor(
+                preprocessing.BGLPreprocessorConfig()
+            )
+            hierarchy_df = self._load_knowledge_df(hierarchy_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(hierarchy_df)
+            hierarchy = knowledge.HierarchyKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            hierarchy.build_hierarchy_from_df(hierarchy_df, metadata.x_vocab)
+            return hierarchy
+        elif self.config.sequence_type == "hdfs_logs":
+            hierarchy_preprocessor = preprocessing.HDFSLogsHierarchyPreprocessor(
+                preprocessing.HDFSPreprocessorConfig()
+            )
+            hierarchy_df = self._load_knowledge_df(hierarchy_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(hierarchy_df)
+            hierarchy = knowledge.HierarchyKnowledge(
+                config=knowledge.KnowledgeConfig(),
+            )
+            hierarchy.build_hierarchy_from_df(hierarchy_df, metadata.x_vocab)
+            return hierarchy
+        elif self.config.sequence_type == "tbird_logs":
+            hierarchy_preprocessor = preprocessing.ThunderBirdLogsHierarchyPreprocessor(
+                preprocessing.ThunderBirdPreprocessorConfig()
+            )
+            hierarchy_df = self._load_knowledge_df(hierarchy_preprocessor.load_data)
+            if self.config.serialize_knowledge_df:
+                self._serialize_knowledge_df(hierarchy_df)
             hierarchy = knowledge.HierarchyKnowledge(
                 config=knowledge.KnowledgeConfig(),
             )
@@ -486,6 +644,27 @@ class ExperimentRunner:
             )
             self.sequence_column_name = sequence_preprocessor.sequence_column_name
             return sequence_preprocessor.load_data()
+        elif self.config.sequence_type == "bgl_logs":
+            bgl_config = preprocessing.BGLPreprocessorConfig()
+            sequence_preprocessor = preprocessing.BGLLogsPreprocessor(
+                bgl_config,
+            )
+            self.sequence_column_name = sequence_preprocessor.sequence_column_name
+            return sequence_preprocessor.load_data()
+        elif self.config.sequence_type == "hdfs_logs":
+            hdfs_config = preprocessing.HDFSPreprocessorConfig()
+            sequence_preprocessor = preprocessing.HDFSLogsPreprocessor(
+                hdfs_config,
+            )
+            self.sequence_column_name = sequence_preprocessor.sequence_column_name
+            return sequence_preprocessor.load_data()
+        elif self.config.sequence_type == "tbird_logs":
+            tbird_config = preprocessing.ThunderBirdPreprocessorConfig()
+            sequence_preprocessor = preprocessing.ThunderBirdLogsPreprocessor(
+                tbird_config,
+            )
+            self.sequence_column_name = sequence_preprocessor.sequence_column_name
+            return sequence_preprocessor.load_data()
         else:
             logging.fatal("Unknown data type %s", self.config.sequence_type)
             raise InputError(
@@ -495,14 +674,6 @@ class ExperimentRunner:
     def _collect_sequence_metadata(
         self, sequence_df: pd.DataFrame
     ) -> sequences.SequenceMetadata:
-        if self.config.max_data_size > 0:
-            logging.debug(
-                "Using subset of length %d instead total df of length %d",
-                self.config.max_data_size,
-                len(sequence_df),
-            )
-            sequence_df = sequence_df[0 : self.config.max_data_size]
-
         transformer = sequences.load_sequence_transformer()
         if not transformer.config.flatten_y:
             self.multilabel_classification = False

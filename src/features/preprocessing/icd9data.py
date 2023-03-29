@@ -174,7 +174,10 @@ class ICD9DataPreprocessor(Preprocessor):
 
             direct_parent = self._get_direct_parent(parent_code, child_code)
             if direct_parent != parent_code and direct_parent in hierarchy_infos:
-                hierarchy_df = hierarchy_df.append(
+                hierarchy_df = pd.concat(
+                    [
+                    hierarchy_df,
+                    pd.DataFrame([
                     {
                         "parent_url": hierarchy_infos[direct_parent]["url"],
                         "parent_name": hierarchy_infos[direct_parent]["name"],
@@ -182,9 +185,9 @@ class ICD9DataPreprocessor(Preprocessor):
                         "child_url": child_url,
                         "child_name": child_name,
                         "child_code": child_code,
-                    },
-                    ignore_index=True,
-                )
+                    }])
+                    ], 
+                    ignore_index=True)
             else:
                 if direct_parent != parent_code:
                     logging.error(
@@ -193,7 +196,10 @@ class ICD9DataPreprocessor(Preprocessor):
                         direct_parent,
                         parent_code,
                     )
-                hierarchy_df = hierarchy_df.append(
+                hierarchy_df = pd.concat(
+                    [
+                    hierarchy_df,
+                    pd.DataFrame([
                     {
                         "parent_url": parent_url,
                         "parent_name": parent_name,
@@ -201,9 +207,9 @@ class ICD9DataPreprocessor(Preprocessor):
                         "child_url": child_url,
                         "child_name": child_name,
                         "child_code": child_code,
-                    },
-                    ignore_index=True,
-                )
+                    }])
+                    ], 
+                    ignore_index=True)
         return hierarchy_df
 
     def _query_hierarchy_from(
@@ -231,27 +237,25 @@ class ICD9DataPreprocessor(Preprocessor):
             child_text = list_item.get_text()
             child_code = child_text.split(" ")[0]
             child_name = " ".join(child_text.split(" ")[1:])
-            hierarchy_df = hierarchy_df.append(
-                {
-                    "parent_url": parent_url,
-                    "parent_name": parent_name,
-                    "parent_code": parent_code,
-                    "child_url": child_url,
-                    "child_name": child_name,
-                    "child_code": child_code,
-                },
-                ignore_index=True,
-            )
+            hierarchy_df = pd.concat([
+                hierarchy_df,
+                pd.DataFrame([
+                    {
+                        "parent_url": parent_url,
+                        "parent_name": parent_name,
+                        "parent_code": parent_code,
+                        "child_url": child_url,
+                        "child_name": child_name,
+                        "child_code": child_code,
+                    }
+                ])
+            ], ignore_index=True)
             if "-" in child_code:
-                hierarchy_df = hierarchy_df.append(
-                    self._query_hierarchy_from(child_url, child_name, child_code),
-                    ignore_index=True,
-                )
+                hierarchy_df = pd.concat([hierarchy_df, 
+                                          self._query_hierarchy_from(child_url, child_name, child_code)], ignore_index=True)
             else:
-                hierarchy_df = hierarchy_df.append(
-                    self._query_leaf_hierarchy_from(child_url, child_name, child_code),
-                    ignore_index=True,
-                )
+                hierarchy_df = pd.concat([hierarchy_df, 
+                                          self._query_leaf_hierarchy_from(child_url, child_name, child_code)], ignore_index=True)
 
         return hierarchy_df
 

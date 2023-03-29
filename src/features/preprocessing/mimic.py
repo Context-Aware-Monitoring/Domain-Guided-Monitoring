@@ -110,23 +110,23 @@ class ICD9HierarchyPreprocessor(Preprocessor):
                 .reset_index(drop=True)["child_name"]
                 .to_list()[0]
             )
-            hierarchy_df = hierarchy_df.append(
+            hierarchy_df = pd.concat([
+                hierarchy_df,
+                pd.DataFrame([
                 {
                     "child_id": to_replace_keys[idx],
                     "child_name": to_replace_name,
                     "parent_id": "NOISENODE" + str(idx),
                     "parent_name": "NOISENODE" + str(idx),
                 },
-                ignore_index=True,
-            ).append(
                 {
                     "child_id": replacement_keys[idx],
                     "child_name": replacement_keys[idx],
                     "parent_id": "NOISENODE" + str(idx),
                     "parent_name": "NOISENODE" + str(idx),
-                },
-                ignore_index=True,
-            )
+                }
+                ])
+            ], ignore_index=True)
 
         return hierarchy_df
 
@@ -173,8 +173,8 @@ class CCSHierarchyPreprocessor(Preprocessor):
             all_parents = [(id, name) for (id, name) in all_parents if len(id) > 0]
 
             # Labels are sorted from general -> specific
-
-            transformed_hierarchy_df = transformed_hierarchy_df.append(
+            transformed_hierarchy_df = pd.concat([
+                transformed_hierarchy_df,
                 pd.DataFrame(
                     data={
                         "parent_id": [id for (id, _) in all_parents],
@@ -185,7 +185,7 @@ class CCSHierarchyPreprocessor(Preprocessor):
                         + [_convert_to_3digit_icd9(row["ICD-9-CM CODE"])],
                     }
                 )
-            )
+            ])
 
         return transformed_hierarchy_df
 
@@ -235,13 +235,15 @@ class ICD9DescriptionPreprocessor(Preprocessor):
                 + " NOISENODE"
                 + str(idx)
             )
-            description_df = description_df.append(
-                {
-                    "label": replacement_keys[idx],
-                    "description": "NOISENODE" + str(idx),
-                },
-                ignore_index=True,
-            )
+            description_df = pd.concat([
+                description_df,
+                pd.DataFrame([
+                    {
+                        "label": replacement_keys[idx],
+                        "description": "NOISENODE" + str(idx),
+                    }
+                ])
+            ], ignore_index=True)
 
         return description_df
 
@@ -326,23 +328,23 @@ class KnowlifePreprocessor(Preprocessor):
             range(len(to_replace_keys)),
             desc="Adding noise connections for MIMIC Knowlife Causality",
         ):
-            knowlife_df = knowlife_df.append(
-                {
-                    "child_id": to_replace_keys[idx],
-                    "child_name": to_replace_keys[idx],
-                    "parent_id": "NOISENODE" + str(idx),
-                    "parent_name": "NOISENODE" + str(idx),
-                },
-                ignore_index=True,
-            ).append(
-                {
-                    "child_id": replacement_keys[idx],
-                    "child_name": replacement_keys[idx],
-                    "parent_id": "NOISENODE" + str(idx),
-                    "parent_name": "NOISENODE" + str(idx),
-                },
-                ignore_index=True,
-            )
+            knowlife_df = pd.concat([
+                knowlife_df,
+                pd.DataFrame([
+                    {
+                        "child_id": to_replace_keys[idx],
+                        "child_name": to_replace_keys[idx],
+                        "parent_id": "NOISENODE" + str(idx),
+                        "parent_name": "NOISENODE" + str(idx),
+                    },
+                    {
+                        "child_id": replacement_keys[idx],
+                        "child_name": replacement_keys[idx],
+                        "parent_id": "NOISENODE" + str(idx),
+                        "parent_name": "NOISENODE" + str(idx),
+                    }
+                ])
+            ], ignore_index=True)
 
         return knowlife_df
 

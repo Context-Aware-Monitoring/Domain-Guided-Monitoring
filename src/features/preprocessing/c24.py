@@ -140,12 +140,12 @@ class C24HierarchyPreprocessor(Preprocessor):
         ):
             splitted_event = event.split("_")
             for split in splitted_event:
-                hierarchy_df = hierarchy_df.append(
-                    {"parent": "root", "child": split,}, ignore_index=True
-                )
-                hierarchy_df = hierarchy_df.append(
-                    {"parent": split, "child": event,}, ignore_index=True
-                )
+                hierarchy_df = pd.concat(
+                    [hierarchy_df, pd.DataFrame([{"parent": "root", "child": split,}])], 
+                    ignore_index=True)
+                hierarchy_df = pd.concat(
+                    [hierarchy_df, pd.DataFrame([{"parent": split, "child": event,}])], 
+                    ignore_index=True)
 
         hierarchy_df["parent_id"] = hierarchy_df["parent"]
         hierarchy_df["parent_name"] = hierarchy_df["parent"]

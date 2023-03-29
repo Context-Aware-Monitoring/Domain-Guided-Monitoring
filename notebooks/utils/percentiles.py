@@ -6,11 +6,11 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from typing import Dict, Set, List, Any, Tuple
 
-from loading import (
+from utils.loading import (
     load_input_frequency_dict,
     load_prediction_df,
 )
-from comparison import load_comparison_df
+from utils.comparison import load_comparison_df
 
 
 def _nullsafe_accuracy_for(top: pd.DataFrame, bottom: pd.DataFrame) -> float:
@@ -307,6 +307,7 @@ def plot_accuracies_per_percentiles(
     share_y: bool = False,
     show_plot: bool = False,
     show_improvements: bool = True,
+    algorithm_types: List[str] = ["causal_heuristic", "causal_score"]
 ):
     grouped_df = (
         pd.merge(relevant_run_df, accuracy_df, left_on="info_run_id", right_on="run_id")
@@ -411,7 +412,7 @@ def plot_accuracies_per_percentiles(
         mean_grouped_df = pd.concat(comparison_dfs).reset_index()
         mean_grouped_df = mean_grouped_df.melt(
             id_vars=["type", "percentile", comparison_column],
-            value_vars=["causal", "gram", "text"],
+            value_vars=algorithm_types,
             value_name="mean_accuracy_diff",
         )
 
@@ -452,7 +453,7 @@ def plot_accuracies_per_percentiles(
         median_grouped_df = pd.concat(comparison_dfs).reset_index()
         median_grouped_df = median_grouped_df.melt(
             id_vars=["type", "percentile", comparison_column],
-            value_vars=["causal", "gram", "text"],
+            value_vars=algorithm_types,
             value_name="median_accuracy_diff",
         )
 

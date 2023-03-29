@@ -1,6 +1,4 @@
 import dataclasses
-import datetime
-import http
 import logging
 import re
 from collections import Counter
@@ -15,7 +13,6 @@ import pandas as pd
 from cdt.causality.graph import CGNN, GES, GIES, PC, SAM, CCDr
 from cdt.causality.graph.bnlearn import GS, IAMB, MMPC, Fast_IAMB, Inter_IAMB
 from src.features.preprocessing.evdef import EventDefinitionMap
-from src.features.preprocessing.huawei_traces import HuaweiTracePreprocessor
 from src.features.preprocessing.ts_transformation import (
     TimeSeriesTransformer, TimeSeriesTransformerConfig)
 from tqdm import tqdm
@@ -26,40 +23,23 @@ from .drain import Drain, DrainParameters
 
 @dataclass_cli.add
 @dataclasses.dataclass
-class HuaweiPreprocessorConfig:
-    aggregated_log_file: Path = Path("data/logs_aggregated_concurrent.csv")
-    traces_root_directory: Path = Path("data/concurrent_data/traces/")
-    final_log_file: Path = Path("data/huawei.pkl")
+class HDFSPreprocessorConfig:
+    aggregated_log_file: Path = Path("data/logs_HDFS.csv")
+    final_log_file: Path = Path("data/hdfs.pkl")
     relevant_aggregated_log_columns: List[str] = dataclasses.field(
         default_factory=lambda: [
-            "Hostname",
-            "log_level",
-            "programname",
-            "python_module",
-            "http_status",
-            "http_method",
+            "Level",
+            "Component",
+            "Pid",
         ],
     )
-    relevant_trace_columns: List[str] = dataclasses.field(
-        default_factory=lambda: [
-            "Hostname",
-            "trace_name",
-            "trace_service",
-            "python_module",
-            "trace_project",
-            "payload",
-            "etype",
-            "http_method",
-            "function",
-        ],
-    )
-    use_trace_data: bool = False
-    aggregate_per_trace: bool = False
     aggregate_per_max_number: int = -1
     aggregate_per_time_frequency: str = ""
-    log_datetime_column_name: str = "@timestamp"
-    log_datetime_format: str = "%Y-%m-%dT%H:%M:%S.%f%z"
+    log_datetime_column_name: str = "timestamp"
+    log_datetime_format: str = "%Y-%m-%d %H:%M:%S"
     log_payload_column_name: str = "Payload"
+    label_column_name: str = "Label"
+    include_label_in_knowledge: bool = False
     use_log_hierarchy: bool = False
     fine_drain_log_depth: int = 10
     fine_drain_log_st: float = 0.75
@@ -67,85 +47,39 @@ class HuaweiPreprocessorConfig:
     coarse_drain_log_st: float = 0.2
     drain_log_depths: List[int] = dataclasses.field(default_factory=lambda: [],)
     drain_log_sts: List[float] = dataclasses.field(default_factory=lambda: [],)
-    url_column_name: str = "http_url"
-    drain_url_depth: int = 10
-    drain_url_st: float = 0.5
     add_log_clusters: bool = True
-    min_logs_per_trace: int = 2
     min_causality: float = 0.0
     log_only_causality: bool = False
     relevant_log_column: str = "fine_log_cluster_template"
     log_template_file: Path = Path("data/attention_log_templates.csv")
-    remove_dates_from_payload: bool = True
     r_path = '/usr/bin/Rscript'
     causal_algorithm_alpha: float = 0.05
 
-class ConcurrentAggregatedLogsPreprocessor(Preprocessor):
-    sequence_column_name: str = "all_events"
-    request_drain_regex: str = "[^a-zA-Z0-9\-\.]"
-    payload_datetime_regex: str = "\[\d\d\/...\/\d\d\d\d(.*?)\]"
 
-    def __init__(self, config: HuaweiPreprocessorConfig):
+class HDFSLogsPreprocessor(Preprocessor):
+    sequence_column_name: str = "all_events"
+
+    def __init__(self, config: HDFSPreprocessorConfig):
         self.config = config
         self.relevant_columns = set(
             [x for x in self.config.relevant_aggregated_log_columns]
         )
         self.relevant_columns.add("fine_log_cluster_template")
         self.relevant_columns.add("coarse_log_cluster_template")
-        self.relevant_columns.add("url_cluster_template")
+
+        if self.config.include_label_in_knowledge:
+            self.relevant_columns.add(self.config.label_column_name)
+
         for i in range(len(self.config.drain_log_depths)):
             self.relevant_columns.add(str(i) + "_log_cluster_template")
-        if self.config.use_trace_data:
-            self.relevant_columns.update(self.config.relevant_trace_columns)
 
     def load_data(self) -> pd.DataFrame:
-        if self.config.aggregate_per_trace:
-            return self._load_data_per_trace()
-        elif self.config.aggregate_per_max_number > 0:
-            log_only_data = (
-                self._load_log_only_data()
-                .sort_values(by="timestamp")
-                .reset_index(drop=True)
-                .reset_index(drop=False)
-            )
-            log_only_data["grouper"] = log_only_data["index"].apply(
-                lambda x: int(x / self.config.aggregate_per_max_number)
-            )
-            return self._aggregate_per(log_only_data, aggregation_column="grouper")
-        elif len(self.config.aggregate_per_time_frequency) > 0:
-            log_only_data = (
-                self._load_log_only_data()
-                .sort_values(by="timestamp")
-                .reset_index(drop=True)
-                .reset_index(drop=False)
-            )
-            aggregated_log_data = self._aggregate_per(
-                log_only_data,
-                aggregation_column=pd.Grouper(
-                    key="timestamp", freq=self.config.aggregate_per_time_frequency
-                ),
-            )
-            return aggregated_log_data[aggregated_log_data["num_events"] > 1]
-        else:
-            log_only_data = self._load_log_only_data()
-            log_only_data["grouper"] = 1
-            return self._aggregate_per(log_only_data, aggregation_column="grouper")
-
-    def _load_data_per_trace(self) -> pd.DataFrame:
-        full_df = self.load_full_data()
-        aggregated_df = self._aggregate_per(full_df)
-        aggregated_df = aggregated_df[
-            aggregated_df["num_events"] >= self.config.min_logs_per_trace
-        ]
-        logging.info(
-            "Summary of num_events:\n %s",
-            aggregated_df["num_events"].describe().to_string(),
-        )
-        return aggregated_df
+        log_only_data = self._load_log_only_data()
+        log_only_data["grouper"] = 1
+        return self._aggregate_per(log_only_data, aggregation_column="grouper")
 
     def _load_log_only_data(self) -> pd.DataFrame:
         log_df = self._read_log_df()
-        log_df = self._add_url_drain_clusters(log_df)
         for column in [x for x in log_df.columns if "log_cluster_template" in x]:
             log_df[column] = (
                 log_df[column]
@@ -156,26 +90,10 @@ class ConcurrentAggregatedLogsPreprocessor(Preprocessor):
             )
         return log_df
 
-    def load_full_data(self) -> pd.DataFrame:
-        logging.info(
-            "Trying to read full huawei_df from %s", self.config.final_log_file
-        )
-        if not self.config.final_log_file.is_file():
-            full_df = self._load_full_data()
-            full_df.to_pickle(self.config.final_log_file)
-
-        return pd.read_pickle(self.config.final_log_file)
-
-    def _load_full_data(self) -> pd.DataFrame:
-        log_df = self._read_log_df()
-        trace_df = self._read_trace_df()
-        merged_df = self._merge_logs_traces(log_df, trace_df)
-        return self._add_url_drain_clusters(merged_df)
-
     def _aggregate_per(
         self, merged_df: pd.DataFrame, aggregation_column: str = "parent_trace_id"
     ) -> pd.DataFrame:
-        logging.debug("Aggregating huawei data per %s", aggregation_column)
+        logging.debug("Aggregating HDFS data per %s", aggregation_column)
         for column in self.relevant_columns:
             merged_df[column] = merged_df[column].apply(
                 lambda x: column + "#" + x.lower() if len(x) > 0 else ""
@@ -214,50 +132,6 @@ class ConcurrentAggregatedLogsPreprocessor(Preprocessor):
             + [x for x in self.relevant_columns if "log_cluster_template" in x]
         ]
 
-    def _merge_logs_traces(self, log_df: pd.DataFrame, trace_df: pd.DataFrame):
-        log_df_with_trace_id = self._match_logs_to_traces(log_df, trace_df)
-        if self.config.use_trace_data:
-            return pd.concat(
-                [log_df_with_trace_id, trace_df], ignore_index=True
-            ).reset_index(drop=True)
-        else:
-            return log_df_with_trace_id.reset_index(drop=True)
-
-    def _match_logs_to_traces(self, log_df: pd.DataFrame, trace_df: pd.DataFrame):
-        max_timestamp_by_trace = trace_df.groupby(by="parent_trace_id").agg(
-            {"timestamp": max,}
-        )
-        min_timestamp_by_trace = trace_df.groupby(by="parent_trace_id").agg(
-            {"timestamp": min,}
-        )
-        timestamps_merged = pd.merge(
-            max_timestamp_by_trace,
-            min_timestamp_by_trace,
-            left_index=True,
-            right_index=True,
-            suffixes=("_max", "_min"),
-        )
-        merged_dfs = []
-        for idx, row in tqdm(
-            timestamps_merged.iterrows(),
-            total=len(timestamps_merged),
-            desc="Matching logs to traces...",
-        ):
-            rel_df = log_df.loc[
-                (log_df["timestamp"] >= row["timestamp_min"])
-                & (log_df["timestamp"] <= row["timestamp_max"])
-            ].copy()
-            rel_df["parent_trace_id"] = idx
-            merged_dfs.append(rel_df)
-        return pd.concat(merged_dfs).drop_duplicates().reset_index(drop=True)
-
-    def _read_trace_df(self) -> pd.DataFrame:
-        preprocessor = HuaweiTracePreprocessor(
-            trace_base_directory=self.config.traces_root_directory
-        )
-        trace_df = preprocessor.load_data()
-        return trace_df
-
     def _read_log_df(self) -> pd.DataFrame:
         df = (
             pd.read_csv(self.config.aggregated_log_file)
@@ -266,69 +140,19 @@ class ConcurrentAggregatedLogsPreprocessor(Preprocessor):
             .replace(np.nan, "", regex=True)
         )
 
-        if self.config.remove_dates_from_payload:
-            df['Payload'] = df['Payload'].map(lambda x: re.sub(self.payload_datetime_regex, "", x))
-
         rel_df = df[
             self.config.relevant_aggregated_log_columns
             + [self.config.log_datetime_column_name]
             + [self.config.log_payload_column_name]
-            + [self.config.url_column_name]
         ]
         rel_df = self._add_log_drain_clusters(rel_df)
         if self.config.log_template_file.exists():
             rel_df = self._add_precalculated_log_templates(rel_df)
         rel_df["timestamp"] = pd.to_datetime(
-            rel_df[self.config.log_datetime_column_name]
+            rel_df[self.config.log_datetime_column_name],
+            format=self.config.log_datetime_format
         )
         return rel_df
-
-    def _add_url_drain_clusters(self, df: pd.DataFrame) -> pd.DataFrame:
-        url_df = pd.DataFrame(
-            df[self.config.url_column_name].dropna().drop_duplicates()
-        )
-        drain = Drain(
-            DrainParameters(
-                depth=self.config.drain_url_depth,
-                st=self.config.drain_url_st,
-                rex=[(self.request_drain_regex, " "),],
-            ),
-            data_df=url_df,
-            data_df_column_name=self.config.url_column_name,
-        )
-        drain_result_df = (
-            drain.load_data().drop_duplicates(ignore_index=False).set_index("log_idx")
-        )
-        url_result_df = (
-            pd.merge(
-                df,
-                pd.merge(
-                    url_df,
-                    drain_result_df,
-                    left_index=True,
-                    right_index=True,
-                    how="left",
-                )
-                .drop_duplicates()
-                .reset_index(drop=True),
-                on=self.config.url_column_name,
-                how="left",
-            )
-            .rename(
-                columns={
-                    "cluster_template": "url_cluster_template",
-                    "cluster_path": "url_cluster_path",
-                }
-            )
-            .drop(columns=["cluster_id"])
-        )
-        url_result_df["url_cluster_template"] = (
-            url_result_df["url_cluster_template"]
-            .fillna("")
-            .astype(str)
-            .replace(np.nan, "", regex=True)
-        )
-        return url_result_df
 
     def _add_log_drain_clusters_prefix(
         self, log_df: pd.DataFrame, depth: int, st: float, prefix: str
@@ -342,7 +166,6 @@ class ConcurrentAggregatedLogsPreprocessor(Preprocessor):
                 st=st,
                 rex=[
                     ("(/|)([0-9]+\.){3}[0-9]+(:[0-9]+|)(:|)", ""),
-                    (self.request_drain_regex, " "),
                     ("[^a-zA-Z\d\s:]", ""),
                 ],
             ),
@@ -413,39 +236,29 @@ class ConcurrentAggregatedLogsPreprocessor(Preprocessor):
             )
         return log_result_df
 
-
-class ConcurrentAggregatedLogsDescriptionPreprocessor(Preprocessor):
+class HDFSLogsDescriptionPreprocessor(Preprocessor):
     def __init__(
-        self, config: HuaweiPreprocessorConfig,
+        self, config: HDFSPreprocessorConfig,
     ):
         self.config = config
 
     def load_data(self) -> pd.DataFrame:
-        preprocessor = ConcurrentAggregatedLogsPreprocessor(self.config)
-        huawei_df = preprocessor._load_log_only_data()
-        return self._load_column_descriptions(huawei_df, preprocessor.relevant_columns)
+        preprocessor = HDFSLogsPreprocessor(self.config)
+        hdfs_df = preprocessor._load_log_only_data()
+        return self._load_column_descriptions(hdfs_df, preprocessor.relevant_columns)
 
     def _load_column_descriptions(
-        self, huawei_df: pd.DataFrame, relevant_columns: Set[str]
+        self, hdfs_df: pd.DataFrame, relevant_columns: Set[str]
     ) -> pd.DataFrame:
-        http_descriptions = self._load_http_descriptions()
         column_descriptions = self._get_column_descriptions()
         description_records = []
         for column in relevant_columns:
             values = set(
-                huawei_df[column].dropna().astype(str).replace(np.nan, "", regex=True)
+                hdfs_df[column].dropna().astype(str).replace(np.nan, "", regex=True)
             )
             values = set([str(x).lower() for x in values if len(str(x)) > 0])
             for value in tqdm(values, desc="Loading descriptions for column " + column):
-                description = ""
-                if column == "Hostname":
-                    name = value.rstrip("0123456789")
-                    number = value[len(name) :]
-                    description = name + " " + number
-                elif column == "http_status":
-                    description = http_descriptions[value]
-                else:
-                    description = " ".join(re.split("[,._\-\*]+", value))
+                description = " ".join(re.split("[,._\-\*]+", value))
 
                 if column in column_descriptions:
                     description = column_descriptions[column] + " " + description
@@ -462,34 +275,17 @@ class ConcurrentAggregatedLogsDescriptionPreprocessor(Preprocessor):
 
     def _get_column_descriptions(self) -> Dict[str, str]:
         return {
-            "Hostname": "Host name",
-            "log_level": "Log level",
-            "programname": "Program name",
-            "python_module": "Python module",
-            "http_status": "HTTP status",
-            "http_method": "HTTP method",
-            "trace_name": "Trace name",
-            "trace_service": "Trace service",
-            "trace_project": "Trace project",
-            "etype": "Error type",
-            "function": "Function",
-            "url_cluster_template": "Url Cluster",
+            "Label": "Label",
+            "Level": "Log level",
+            "Code1": "Code 1",
+            "Code2": "Code 2",
+            "Component1": "Component 1",
+            "Component2": "Component 2",
         }
 
-    def _load_http_descriptions(self) -> Dict[str, str]:
-        logging.debug("Initializing HTTP Status descriptions")
-        http_descriptions = {}
-        for status in list(http.HTTPStatus):
-            http_descriptions[str(status.value) + ".0"] = status.name.lower().replace(
-                "_", " "
-            )
-
-        return http_descriptions
-
-
-class ConcurrentAggregatedLogsHierarchyPreprocessor(Preprocessor):
+class HDFSLogsHierarchyPreprocessor(Preprocessor):
     def __init__(
-        self, config: HuaweiPreprocessorConfig,
+        self, config: HDFSPreprocessorConfig,
     ):
         self.config = config
 
@@ -500,27 +296,27 @@ class ConcurrentAggregatedLogsHierarchyPreprocessor(Preprocessor):
             return self._load_attribute_only_hierarchy()
 
     def _load_log_only_hierarchy(self) -> pd.DataFrame:
-        preprocessor = ConcurrentAggregatedLogsPreprocessor(self.config)
-        huawei_df = preprocessor._load_log_only_data()
+        preprocessor = HDFSLogsPreprocessor(self.config)
+        hdfs_df = preprocessor._load_log_only_data()
 
         relevant_log_columns = set(
             [x for x in preprocessor.relevant_columns if "log_cluster_template" in x]
             + ["coarse_log_cluster_path"]
         )
         attribute_hierarchy = self._load_attribute_hierarchy(
-            huawei_df, set(["coarse_log_cluster_path"])
+            hdfs_df, set(["coarse_log_cluster_path"])
         )
         return (
             pd.concat(
-            [attribute_hierarchy, self._load_log_hierarchy(huawei_df, relevant_log_columns)], 
+            [attribute_hierarchy, self._load_log_hierarchy(hdfs_df, relevant_log_columns)], 
             ignore_index=True)
             .drop_duplicates()
             .reset_index(drop=True)
         )
 
     def _load_attribute_only_hierarchy(self) -> pd.DataFrame:
-        preprocessor = ConcurrentAggregatedLogsPreprocessor(self.config)
-        huawei_df = preprocessor._load_log_only_data()
+        preprocessor = HDFSLogsPreprocessor(self.config)
+        hdfs_df = preprocessor._load_log_only_data()
         relevant_columns = set(
             [
                 x
@@ -529,22 +325,22 @@ class ConcurrentAggregatedLogsHierarchyPreprocessor(Preprocessor):
             ]
         )
         attribute_hierarchy = self._load_attribute_hierarchy(
-            huawei_df, relevant_columns
+            hdfs_df, relevant_columns
         )
         return (
-            pd.concat([attribute_hierarchy, self._load_log_hierarchy(huawei_df, relevant_columns)], ignore_index=True)
+            pd.concat([attribute_hierarchy, self._load_log_hierarchy(hdfs_df, relevant_columns)], ignore_index=True)
             .drop_duplicates()
             .reset_index(drop=True)
         )
 
     def _load_log_hierarchy(
-        self, huawei_df: pd.DataFrame, relevant_columns: Set[str]
+        self, hdfs_df: pd.DataFrame, relevant_columns: Set[str]
     ) -> pd.DataFrame:
         hierarchy_records = []
         for _, row in tqdm(
-            huawei_df.iterrows(),
-            desc="Adding huawei log hierarchy",
-            total=len(huawei_df),
+            hdfs_df.iterrows(),
+            desc="Adding HDFS log hierarchy",
+            total=len(hdfs_df),
         ):
             log_template = str(row[self.config.relevant_log_column]).lower()
             for column in relevant_columns:
@@ -571,7 +367,7 @@ class ConcurrentAggregatedLogsHierarchyPreprocessor(Preprocessor):
         )
 
     def _load_attribute_hierarchy(
-        self, huawei_df: pd.DataFrame, relevant_columns: Set[str]
+        self, hdfs_df: pd.DataFrame, relevant_columns: Set[str]
     ) -> pd.DataFrame:
         hierarchy_df = pd.DataFrame(
             columns=["parent_id", "child_id", "parent_name", "child_name"]
@@ -590,7 +386,7 @@ class ConcurrentAggregatedLogsHierarchyPreprocessor(Preprocessor):
             values = set(
                 [
                     str(x).lower()
-                    for x in huawei_df[column]
+                    for x in hdfs_df[column]
                     .dropna()
                     .astype(str)
                     .replace(np.nan, "", regex=True)
@@ -599,11 +395,7 @@ class ConcurrentAggregatedLogsHierarchyPreprocessor(Preprocessor):
             )
             for value in tqdm(values, desc="Loading hierarchy for column " + column):
                 hierarchy_elements = [column]
-                if column == "Hostname":
-                    hierarchy_elements.append(value.rstrip("0123456789"))
-                elif column == "http_status":
-                    hierarchy_elements.append(value[0] + "00")
-                elif "cluster" in column:
+                if "cluster" in column:
                     hierarchy_elements = hierarchy_elements + value.split()
                 else:
                     hierarchy_elements = hierarchy_elements + re.split(
@@ -645,17 +437,9 @@ class ConcurrentAggregatedLogsHierarchyPreprocessor(Preprocessor):
 
         return hierarchy_df[["parent_id", "child_id", "parent_name", "child_name"]]
 
-    def _generate_hostname_hierarchy(self, hostname: str) -> List[str]:
-        name = hostname.rstrip("0123456789")
-        return [name]
-
-    def _generate_http_hierarchy(self, http_code: str) -> List[str]:
-        return [http_code[0] + "XX"]
-
-
-class ConcurrentAggregatedLogsCausalityPreprocessor(Preprocessor):
+class HDFSLogsCausalityPreprocessor(Preprocessor):
     def __init__(
-        self, config: HuaweiPreprocessorConfig,
+        self, config: HDFSPreprocessorConfig,
     ):
         self.config = config
         self.algorithms = {
@@ -789,8 +573,8 @@ class ConcurrentAggregatedLogsCausalityPreprocessor(Preprocessor):
         cdt.SETTINGS.rpath = config.r_path
         
     def load_data(self, algorithm = "heuristic") -> pd.DataFrame:
-        preprocessor = ConcurrentAggregatedLogsPreprocessor(self.config)
-        huawei_df = preprocessor._load_log_only_data().fillna("")
+        preprocessor = HDFSLogsPreprocessor(self.config)
+        hdfs_df = preprocessor._load_log_only_data().fillna("")
         
         relevant_columns = set(
             [
@@ -803,7 +587,7 @@ class ConcurrentAggregatedLogsCausalityPreprocessor(Preprocessor):
         causality_records = []
         if algorithm == "heuristic":
             counted_causality = self._generate_counted_causality(
-                huawei_df, relevant_columns
+                hdfs_df, relevant_columns
             )
 
             for from_value, to_values in tqdm(
@@ -825,13 +609,7 @@ class ConcurrentAggregatedLogsCausalityPreprocessor(Preprocessor):
         else:
             relevant_columns.add(self.config.log_datetime_column_name) # Heuristic doesn't use the timestamps
             transformer = TimeSeriesTransformer(TimeSeriesTransformerConfig(timestamp_column=self.config.log_datetime_column_name))
-
-            # the timestamps have 9-digit microseconds; however, python uses 6 digits
-            huawei_df[self.config.log_datetime_column_name] = (
-                huawei_df[self.config.log_datetime_column_name]
-                .apply(lambda x: datetime.datetime.strptime(x[:26] + x[29:], self.config.log_datetime_format)))
-
-            transformed_df, evmap = transformer.transform_time_series_to_events(huawei_df, relevant_columns)
+            transformed_df, evmap = transformer.transform_time_series_to_events(hdfs_df, relevant_columns)
             causality_records = self._generate_causality_records(transformed_df, evmap, algorithm)
 
         return (
@@ -847,7 +625,7 @@ class ConcurrentAggregatedLogsCausalityPreprocessor(Preprocessor):
         previous_row = None
         for _, row in tqdm(
             df.iterrows(),
-            desc="Generating counted causality for Huawei log data",
+            desc="Generating counted causality for HDFS log data",
             total=len(df),
         ):
             if previous_row is None:

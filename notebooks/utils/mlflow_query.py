@@ -20,7 +20,7 @@ class MlflowHelper:
         self.experiment_id = experiment_id if experiment_id is not None else self.mlflow_client.get_experiment_by_name(experiment_name).experiment_id
         self.local_mlflow_dir = local_mlflow_dir_prefix + str(self.experiment_id) + "/"
         if pkl_file is not None and pkl_file.exists():
-            self.run_df = pd.read_pickle("mlflow_run_df.pkl") 
+            self.run_df = pd.read_pickle(pkl_file) 
             print("Initialized with", len(self.run_df), "MLFlow runs from pkl")
         else:
             self.run_df = pd.DataFrame(columns=["info_run_id"])
@@ -119,9 +119,9 @@ class MlflowHelper:
         ):
             final_run_dict["data_tags_model_type"] = "gram_logs"
 
-        self.run_df = self.run_df.append(
-            final_run_dict, ignore_index=True
-        ).drop_duplicates(subset=["info_run_id"], keep="last", ignore_index=True)
+        self.run_df = pd.concat(
+            [self.run_df, pd.DataFrame([final_run_dict])], ignore_index=True
+            ).drop_duplicates(subset=["info_run_id"], keep="last", ignore_index=True)
     
     
     def mimic_run_df(
@@ -207,11 +207,11 @@ class MlflowHelper:
             & (self.run_df["data_params_ExperimentConfigbatch_size"].astype(str).fillna("") == "128")
             & (
                 (self.run_df["data_params_HuaweiPreprocessorConfigfine_drain_log_st"].astype(str).fillna("") == "0.75")
-                | (self.run_df["data_params_HuaweiPreprocessorConfigdrain_log_st"].astype(str).fillna("") == "0.75")
+                | (self.run_df["data_params_HuaweiPreprocessorConfigcoarse_drain_log_st"].astype(str).fillna("") == "0.75")
             )
             & (
                 (self.run_df["data_params_HuaweiPreprocessorConfigfine_drain_log_depth"].astype(str).fillna("") == "10")
-                | (self.run_df["data_params_HuaweiPreprocessorConfigdrain_log_depth"].astype(str).fillna("") == "10")
+                | (self.run_df["data_params_HuaweiPreprocessorConfigcoarse_drain_log_depth"].astype(str).fillna("") == "10")
             )
             & (
                 (~ (
@@ -245,11 +245,11 @@ class MlflowHelper:
                 huawei_run_df["data_params_SequenceConfigy_sequence_column_name"].apply(lambda x: x in valid_y_columns)
             ]
 
-        if not include_noise:
+        if not include_noise and 'data_tags_noise_type' in huawei_run_df.columns:
             huawei_run_df = huawei_run_df[
                 (huawei_run_df["data_tags_noise_type"].fillna("").apply(len) == 0)
             ]
-        if not include_refinements:
+        if not include_refinements and 'data_tags_refinement_type' in huawei_run_df.columns:
             huawei_run_df = huawei_run_df[
                 (huawei_run_df["data_tags_refinement_type"].fillna("") == "")
                 & (huawei_run_df["data_params_HuaweiPreprocessorConfigmin_causality"].fillna(0.0).astype(str) == "0.01")
