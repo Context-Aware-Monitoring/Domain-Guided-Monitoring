@@ -52,3 +52,9 @@ In order to run this code, you need Anaconda + Python >= 3.8. This repository co
   -  `--experimentconfig_model_type`: use this to choose the knowledge model you want to run; valid values are `simple`, `gram`, `text` and `causal`
   -  to see the full list of options run `python main.py -h`
 - **Visualize Results**: Metrics, artefacts and parameters of an experiment run are logged in MLFlow. You can use the mlflow UI to get a good overview over the experiment results. Execute `mlflow ui` to start mlflow UI on port 5000.
+
+## Additional Materials
+[Folder with Theses accompanying the project](https://www.dropbox.com/scl/fo/dsvltqusw1asuutl24f2c/ACtZnpOr68Pir3Qi9xKtzLg?rlkey=p3csb19oxrw61mibsqdzwuxb6&st=36xhsjgw&dl=0)
+- DomainML - A Modular Framework for Domain Knowledge Guided Machine Learning
+- Refining Domain Knowledge for Domain Knowledge Guided Machine Learning
+- Generating Causal Domain Knowledge for Cloud Systems Monitoring
